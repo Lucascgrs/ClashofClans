@@ -1,0 +1,2301 @@
+{
+  "metadata": {
+    "date_enregistrement": "2025-08-28 14:39:27",
+    "nombre_actions": 381,
+    "duree_totale": 13.280252933502197
+  },
+  "actions": [
+    {
+      "type": "position_initiale",
+      "x": 861,
+      "y": 324,
+      "temps": 0.0
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1291,
+      "y": 487,
+      "temps": 0.5469839572906494
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1292,
+      "y": 488,
+      "temps": 0.5547945499420166
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1296,
+      "y": 491,
+      "temps": 0.5632457733154297
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1297,
+      "y": 492,
+      "temps": 0.5711884498596191
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1301,
+      "y": 497,
+      "temps": 0.5789926052093506
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1303,
+      "y": 499,
+      "temps": 0.5879268646240234
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1308,
+      "y": 504,
+      "temps": 0.5959036350250244
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1319,
+      "y": 512,
+      "temps": 0.603318452835083
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1327,
+      "y": 519,
+      "temps": 0.611752986907959
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1339,
+      "y": 527,
+      "temps": 0.6188607215881348
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1349,
+      "y": 533,
+      "temps": 0.6278142929077148
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1361,
+      "y": 541,
+      "temps": 0.6346473693847656
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1372,
+      "y": 549,
+      "temps": 0.6435873508453369
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1385,
+      "y": 554,
+      "temps": 0.6510195732116699
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1396,
+      "y": 562,
+      "temps": 0.6599140167236328
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1413,
+      "y": 572,
+      "temps": 0.6669507026672363
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1429,
+      "y": 577,
+      "temps": 0.6757955551147461
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1446,
+      "y": 585,
+      "temps": 0.6836681365966797
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1470,
+      "y": 596,
+      "temps": 0.6910600662231445
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1487,
+      "y": 603,
+      "temps": 0.6986711025238037
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1502,
+      "y": 609,
+      "temps": 0.7071428298950195
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1518,
+      "y": 616,
+      "temps": 0.7149455547332764
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1533,
+      "y": 623,
+      "temps": 0.722820520401001
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1543,
+      "y": 627,
+      "temps": 0.7316858768463135
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1556,
+      "y": 634,
+      "temps": 0.7390801906585693
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1567,
+      "y": 638,
+      "temps": 0.7470278739929199
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1578,
+      "y": 643,
+      "temps": 0.7548589706420898
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1585,
+      "y": 647,
+      "temps": 0.7636322975158691
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1596,
+      "y": 653,
+      "temps": 0.7710423469543457
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1604,
+      "y": 658,
+      "temps": 0.7789256572723389
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1608,
+      "y": 661,
+      "temps": 0.7867934703826904
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1611,
+      "y": 662,
+      "temps": 0.7946398258209229
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1615,
+      "y": 666,
+      "temps": 0.8030531406402588
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1618,
+      "y": 668,
+      "temps": 0.8109433650970459
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1620,
+      "y": 669,
+      "temps": 0.8197934627532959
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1625,
+      "y": 673,
+      "temps": 0.827728271484375
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1628,
+      "y": 675,
+      "temps": 0.8345372676849365
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1635,
+      "y": 679,
+      "temps": 0.8429281711578369
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1642,
+      "y": 683,
+      "temps": 0.8513541221618652
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1649,
+      "y": 687,
+      "temps": 0.8587660789489746
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1656,
+      "y": 691,
+      "temps": 0.868690013885498
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1661,
+      "y": 694,
+      "temps": 0.8745467662811279
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1670,
+      "y": 698,
+      "temps": 0.8835053443908691
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1673,
+      "y": 700,
+      "temps": 0.8916187286376953
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1676,
+      "y": 702,
+      "temps": 0.899033784866333
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1681,
+      "y": 704,
+      "temps": 0.9078867435455322
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1686,
+      "y": 705,
+      "temps": 0.9157848358154297
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1688,
+      "y": 705,
+      "temps": 0.9235789775848389
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1691,
+      "y": 706,
+      "temps": 0.931011438369751
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1696,
+      "y": 707,
+      "temps": 0.9386997222900391
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1700,
+      "y": 710,
+      "temps": 0.9471588134765625
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1704,
+      "y": 711,
+      "temps": 0.9549520015716553
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1708,
+      "y": 712,
+      "temps": 0.9638097286224365
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1713,
+      "y": 713,
+      "temps": 0.9707400798797607
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1716,
+      "y": 715,
+      "temps": 0.9791147708892822
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1720,
+      "y": 717,
+      "temps": 0.9877018928527832
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1724,
+      "y": 718,
+      "temps": 0.9946334362030029
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1728,
+      "y": 719,
+      "temps": 1.0039806365966797
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1734,
+      "y": 723,
+      "temps": 1.011871099472046
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1737,
+      "y": 724,
+      "temps": 1.0197739601135254
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1743,
+      "y": 725,
+      "temps": 1.0271799564361572
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1752,
+      "y": 729,
+      "temps": 1.034996509552002
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1754,
+      "y": 732,
+      "temps": 1.0429391860961914
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1759,
+      "y": 734,
+      "temps": 1.0516626834869385
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1766,
+      "y": 737,
+      "temps": 1.0600264072418213
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1771,
+      "y": 739,
+      "temps": 1.0669527053833008
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1773,
+      "y": 741,
+      "temps": 1.0758790969848633
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1776,
+      "y": 744,
+      "temps": 1.0837273597717285
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1780,
+      "y": 747,
+      "temps": 1.0916709899902344
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1782,
+      "y": 748,
+      "temps": 1.0991222858428955
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1787,
+      "y": 752,
+      "temps": 1.1075506210327148
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1789,
+      "y": 754,
+      "temps": 1.114490270614624
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1796,
+      "y": 758,
+      "temps": 1.1238527297973633
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1799,
+      "y": 760,
+      "temps": 1.1307837963104248
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1807,
+      "y": 764,
+      "temps": 1.1396989822387695
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1812,
+      "y": 768,
+      "temps": 1.1471104621887207
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1816,
+      "y": 771,
+      "temps": 1.1549232006072998
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1821,
+      "y": 774,
+      "temps": 1.1633782386779785
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1823,
+      "y": 776,
+      "temps": 1.1715092658996582
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1826,
+      "y": 778,
+      "temps": 1.1789393424987793
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1828,
+      "y": 778,
+      "temps": 1.1877832412719727
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1829,
+      "y": 779,
+      "temps": 1.1957402229309082
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1830,
+      "y": 779,
+      "temps": 1.2028038501739502
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1831,
+      "y": 779,
+      "temps": 1.2271428108215332
+    },
+    {
+      "type": "clic_souris",
+      "x": 1831,
+      "y": 779,
+      "bouton": "Button.left",
+      "presse": true,
+      "temps": 1.2832746505737305
+    },
+    {
+      "type": "clic_souris",
+      "x": 1831,
+      "y": 779,
+      "bouton": "Button.left",
+      "presse": false,
+      "temps": 1.3389601707458496
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1831,
+      "y": 779,
+      "temps": 1.4591805934906006
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1829,
+      "y": 776,
+      "temps": 1.4676885604858398
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1828,
+      "y": 775,
+      "temps": 1.483968734741211
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1826,
+      "y": 771,
+      "temps": 1.490870714187622
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1824,
+      "y": 769,
+      "temps": 1.4987633228302002
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1818,
+      "y": 762,
+      "temps": 1.506847858428955
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1806,
+      "y": 753,
+      "temps": 1.5146639347076416
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1795,
+      "y": 742,
+      "temps": 1.5237758159637451
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1790,
+      "y": 736,
+      "temps": 1.5316767692565918
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1777,
+      "y": 725,
+      "temps": 1.5390667915344238
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1763,
+      "y": 711,
+      "temps": 1.5479226112365723
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1747,
+      "y": 700,
+      "temps": 1.5547630786895752
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1729,
+      "y": 686,
+      "temps": 1.563828468322754
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1706,
+      "y": 674,
+      "temps": 1.571718692779541
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1679,
+      "y": 659,
+      "temps": 1.5791218280792236
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1651,
+      "y": 642,
+      "temps": 1.5869965553283691
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1614,
+      "y": 620,
+      "temps": 1.5958471298217773
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1579,
+      "y": 602,
+      "temps": 1.603696346282959
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1550,
+      "y": 582,
+      "temps": 1.6115727424621582
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1518,
+      "y": 563,
+      "temps": 1.6197011470794678
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1492,
+      "y": 551,
+      "temps": 1.6271247863769531
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1468,
+      "y": 537,
+      "temps": 1.6349356174468994
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1448,
+      "y": 527,
+      "temps": 1.6438243389129639
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1434,
+      "y": 517,
+      "temps": 1.6507480144500732
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1421,
+      "y": 507,
+      "temps": 1.6597917079925537
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1411,
+      "y": 498,
+      "temps": 1.667172908782959
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1402,
+      "y": 488,
+      "temps": 1.6749908924102783
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1389,
+      "y": 477,
+      "temps": 1.6834425926208496
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1376,
+      "y": 465,
+      "temps": 1.6915905475616455
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1362,
+      "y": 454,
+      "temps": 1.700005292892456
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1347,
+      "y": 440,
+      "temps": 1.7077994346618652
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1332,
+      "y": 429,
+      "temps": 1.7157413959503174
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1316,
+      "y": 417,
+      "temps": 1.723572015762329
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1301,
+      "y": 407,
+      "temps": 1.7310166358947754
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1288,
+      "y": 397,
+      "temps": 1.739858865737915
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1273,
+      "y": 386,
+      "temps": 1.7477374076843262
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1258,
+      "y": 377,
+      "temps": 1.7545695304870605
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1245,
+      "y": 368,
+      "temps": 1.763167381286621
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1236,
+      "y": 358,
+      "temps": 1.7708182334899902
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1224,
+      "y": 347,
+      "temps": 1.7797091007232666
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1220,
+      "y": 340,
+      "temps": 1.7871136665344238
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1216,
+      "y": 331,
+      "temps": 1.7948288917541504
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1215,
+      "y": 328,
+      "temps": 1.8037123680114746
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 326,
+      "temps": 1.811800241470337
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 325,
+      "temps": 1.8196780681610107
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 324,
+      "temps": 1.8276770114898682
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 321,
+      "temps": 1.8746569156646729
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 319,
+      "temps": 1.8830649852752686
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 316,
+      "temps": 1.8919646739959717
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1212,
+      "y": 313,
+      "temps": 1.8988771438598633
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1213,
+      "y": 312,
+      "temps": 1.9076869487762451
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1214,
+      "y": 309,
+      "temps": 1.914808988571167
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1214,
+      "y": 308,
+      "temps": 1.9236855506896973
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1215,
+      "y": 306,
+      "temps": 1.9310317039489746
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1216,
+      "y": 305,
+      "temps": 1.9389021396636963
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1219,
+      "y": 303,
+      "temps": 1.9468719959259033
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1220,
+      "y": 300,
+      "temps": 1.954697608947754
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1224,
+      "y": 294,
+      "temps": 1.9636030197143555
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1226,
+      "y": 281,
+      "temps": 1.9710149765014648
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1226,
+      "y": 273,
+      "temps": 1.9798786640167236
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1226,
+      "y": 265,
+      "temps": 1.986762285232544
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1226,
+      "y": 259,
+      "temps": 1.9945943355560303
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1226,
+      "y": 253,
+      "temps": 2.0029799938201904
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1226,
+      "y": 248,
+      "temps": 2.0108585357666016
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1227,
+      "y": 244,
+      "temps": 2.0197136402130127
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1227,
+      "y": 242,
+      "temps": 2.0274598598480225
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 238,
+      "temps": 2.034485101699829
+    },
+    {
+      "type": "clic_souris",
+      "x": 1229,
+      "y": 238,
+      "bouton": "Button.left",
+      "presse": true,
+      "temps": 2.123603105545044
+    },
+    {
+      "type": "clic_souris",
+      "x": 1229,
+      "y": 238,
+      "bouton": "Button.left",
+      "presse": false,
+      "temps": 2.187037467956543
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 238,
+      "temps": 2.8747105598449707
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 239,
+      "temps": 2.883113384246826
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 240,
+      "temps": 2.8913626670837402
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 241,
+      "temps": 2.8999719619750977
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 242,
+      "temps": 2.907228708267212
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 242,
+      "temps": 2.9228944778442383
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 244,
+      "temps": 2.939420461654663
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 245,
+      "temps": 2.954648017883301
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 246,
+      "temps": 2.971024990081787
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 247,
+      "temps": 3.0036561489105225
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 249,
+      "temps": 3.018963575363159
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 250,
+      "temps": 3.027538776397705
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 251,
+      "temps": 3.03444242477417
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 253,
+      "temps": 3.0437846183776855
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 255,
+      "temps": 3.0516419410705566
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 258,
+      "temps": 3.059591770172119
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 262,
+      "temps": 3.0670251846313477
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 265,
+      "temps": 3.0744218826293945
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 266,
+      "temps": 3.0837724208831787
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 269,
+      "temps": 3.0916762351989746
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 269,
+      "temps": 3.099057197570801
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 270,
+      "temps": 3.1069164276123047
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 271,
+      "temps": 3.115774393081665
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 274,
+      "temps": 3.123647928237915
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1229,
+      "y": 275,
+      "temps": 3.1315982341766357
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1230,
+      "y": 276,
+      "temps": 3.138803005218506
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1230,
+      "y": 277,
+      "temps": 3.148728370666504
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1230,
+      "y": 278,
+      "temps": 3.154611349105835
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1230,
+      "y": 280,
+      "temps": 3.163543701171875
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1231,
+      "y": 283,
+      "temps": 3.1709485054016113
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1231,
+      "y": 285,
+      "temps": 3.1797902584075928
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1232,
+      "y": 290,
+      "temps": 3.187201499938965
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1235,
+      "y": 297,
+      "temps": 3.194319725036621
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1236,
+      "y": 300,
+      "temps": 3.20357608795166
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1236,
+      "y": 306,
+      "temps": 3.2109622955322266
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1238,
+      "y": 309,
+      "temps": 3.2188303470611572
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1241,
+      "y": 316,
+      "temps": 3.2271876335144043
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1242,
+      "y": 326,
+      "temps": 3.2350058555603027
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1245,
+      "y": 333,
+      "temps": 3.244856834411621
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1251,
+      "y": 344,
+      "temps": 3.2516539096832275
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1257,
+      "y": 353,
+      "temps": 3.2595715522766113
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1265,
+      "y": 364,
+      "temps": 3.2669594287872314
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1275,
+      "y": 377,
+      "temps": 3.2758116722106934
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1285,
+      "y": 392,
+      "temps": 3.2836523056030273
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1297,
+      "y": 409,
+      "temps": 3.29158878326416
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1308,
+      "y": 425,
+      "temps": 3.2989635467529297
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1322,
+      "y": 439,
+      "temps": 3.3068225383758545
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1336,
+      "y": 459,
+      "temps": 3.3146374225616455
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1351,
+      "y": 474,
+      "temps": 3.3230202198028564
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1366,
+      "y": 489,
+      "temps": 3.330913543701172
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1384,
+      "y": 503,
+      "temps": 3.338787317276001
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1399,
+      "y": 513,
+      "temps": 3.3481264114379883
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1413,
+      "y": 523,
+      "temps": 3.3559999465942383
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1426,
+      "y": 531,
+      "temps": 3.3629066944122314
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1439,
+      "y": 539,
+      "temps": 3.370767831802368
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1452,
+      "y": 550,
+      "temps": 3.379136562347412
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1465,
+      "y": 560,
+      "temps": 3.3870067596435547
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1477,
+      "y": 570,
+      "temps": 3.3948373794555664
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1488,
+      "y": 579,
+      "temps": 3.403669834136963
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1501,
+      "y": 591,
+      "temps": 3.4110913276672363
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1510,
+      "y": 598,
+      "temps": 3.41985821723938
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1523,
+      "y": 606,
+      "temps": 3.426760196685791
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1532,
+      "y": 616,
+      "temps": 3.434567451477051
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1536,
+      "y": 618,
+      "temps": 3.442939519882202
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1541,
+      "y": 622,
+      "temps": 3.4507908821105957
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1543,
+      "y": 624,
+      "temps": 3.459148645401001
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1546,
+      "y": 627,
+      "temps": 3.4670486450195312
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1547,
+      "y": 628,
+      "temps": 3.48374342918396
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1549,
+      "y": 630,
+      "temps": 3.490783452987671
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1551,
+      "y": 632,
+      "temps": 3.499138832092285
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1552,
+      "y": 633,
+      "temps": 3.514808416366577
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1553,
+      "y": 634,
+      "temps": 3.5236785411834717
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1553,
+      "y": 636,
+      "temps": 3.5309338569641113
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 636,
+      "temps": 3.5395474433898926
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 637,
+      "temps": 3.546952724456787
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 639,
+      "temps": 3.554765224456787
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 640,
+      "temps": 3.5631935596466064
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 641,
+      "temps": 3.5710811614990234
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 644,
+      "temps": 4.12299919128418
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 646,
+      "temps": 4.1309192180633545
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 649,
+      "temps": 4.139117479324341
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 650,
+      "temps": 4.146977186203003
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 652,
+      "temps": 4.155815124511719
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 655,
+      "temps": 4.172088384628296
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 657,
+      "temps": 4.179018020629883
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1555,
+      "y": 659,
+      "temps": 4.187835931777954
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 661,
+      "temps": 4.194681882858276
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 661,
+      "temps": 4.211868047714233
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 663,
+      "temps": 4.219740629196167
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 665,
+      "temps": 4.227099418640137
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 666,
+      "temps": 4.23490309715271
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 669,
+      "temps": 4.243749380111694
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 673,
+      "temps": 4.253116846084595
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 677,
+      "temps": 4.260017156600952
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 679,
+      "temps": 4.267671823501587
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 680,
+      "temps": 4.275893926620483
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 685,
+      "temps": 4.28373384475708
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 687,
+      "temps": 4.291694402694702
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 690,
+      "temps": 4.299093246459961
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 695,
+      "temps": 4.307897567749023
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 696,
+      "temps": 4.314838647842407
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 700,
+      "temps": 4.323702573776245
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 703,
+      "temps": 4.332090139389038
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 707,
+      "temps": 4.339972734451294
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 711,
+      "temps": 4.347871541976929
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 714,
+      "temps": 4.354727506637573
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 718,
+      "temps": 4.363194227218628
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1556,
+      "y": 723,
+      "temps": 4.371717691421509
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1557,
+      "y": 725,
+      "temps": 4.379163026809692
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1558,
+      "y": 730,
+      "temps": 4.387009143829346
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1558,
+      "y": 733,
+      "temps": 4.395941495895386
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1559,
+      "y": 735,
+      "temps": 4.403802871704102
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1561,
+      "y": 741,
+      "temps": 4.411306142807007
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1561,
+      "y": 742,
+      "temps": 4.419216156005859
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1562,
+      "y": 746,
+      "temps": 4.427096843719482
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1563,
+      "y": 748,
+      "temps": 4.43599534034729
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1563,
+      "y": 751,
+      "temps": 4.442914247512817
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1565,
+      "y": 756,
+      "temps": 4.451799154281616
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1565,
+      "y": 758,
+      "temps": 4.459218740463257
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1565,
+      "y": 762,
+      "temps": 4.467179536819458
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1567,
+      "y": 767,
+      "temps": 4.475050449371338
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1567,
+      "y": 770,
+      "temps": 4.482914924621582
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1568,
+      "y": 774,
+      "temps": 4.49178409576416
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1568,
+      "y": 777,
+      "temps": 4.499243974685669
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1569,
+      "y": 779,
+      "temps": 4.508096694946289
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1569,
+      "y": 782,
+      "temps": 4.514550685882568
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 783,
+      "temps": 4.522993803024292
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 785,
+      "temps": 4.531898736953735
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 788,
+      "temps": 4.539804697036743
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 790,
+      "temps": 4.547200679779053
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 792,
+      "temps": 4.555032014846802
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 794,
+      "temps": 4.563507795333862
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 797,
+      "temps": 4.571882486343384
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 799,
+      "temps": 4.579805135726929
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 802,
+      "temps": 4.5871806144714355
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 805,
+      "temps": 4.595107316970825
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 809,
+      "temps": 4.603041172027588
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 815,
+      "temps": 4.6115264892578125
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 817,
+      "temps": 4.6189446449279785
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 823,
+      "temps": 4.627895832061768
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 827,
+      "temps": 4.634710073471069
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 833,
+      "temps": 4.643090486526489
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 837,
+      "temps": 4.6509552001953125
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 843,
+      "temps": 4.659809112548828
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 852,
+      "temps": 4.667672872543335
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 860,
+      "temps": 4.675124168395996
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 866,
+      "temps": 4.68303108215332
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 874,
+      "temps": 4.691885948181152
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 879,
+      "temps": 4.6997692584991455
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 888,
+      "temps": 4.707930326461792
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 893,
+      "temps": 4.714761734008789
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 900,
+      "temps": 4.7231574058532715
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 908,
+      "temps": 4.731073379516602
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 919,
+      "temps": 4.739924430847168
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 925,
+      "temps": 4.747804164886475
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 931,
+      "temps": 4.754651308059692
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 937,
+      "temps": 4.763101100921631
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 942,
+      "temps": 4.770963907241821
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 946,
+      "temps": 4.779881954193115
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1575,
+      "y": 951,
+      "temps": 4.787683725357056
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 954,
+      "temps": 4.796172857284546
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 956,
+      "temps": 4.803024768829346
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 957,
+      "temps": 4.811672210693359
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 958,
+      "temps": 4.819101333618164
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1574,
+      "y": 962,
+      "temps": 4.82694149017334
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1573,
+      "y": 963,
+      "temps": 4.834760904312134
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1573,
+      "y": 963,
+      "temps": 4.843126058578491
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1572,
+      "y": 966,
+      "temps": 4.852009296417236
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1571,
+      "y": 968,
+      "temps": 4.858867883682251
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1571,
+      "y": 972,
+      "temps": 4.8672990798950195
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1570,
+      "y": 975,
+      "temps": 4.875108957290649
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1569,
+      "y": 977,
+      "temps": 4.883962631225586
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1568,
+      "y": 979,
+      "temps": 4.891870975494385
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1568,
+      "y": 981,
+      "temps": 4.899754285812378
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1568,
+      "y": 982,
+      "temps": 4.907180309295654
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1568,
+      "y": 983,
+      "temps": 4.923877954483032
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1567,
+      "y": 986,
+      "temps": 4.971185922622681
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1566,
+      "y": 988,
+      "temps": 4.979088306427002
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1565,
+      "y": 990,
+      "temps": 4.994591951370239
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1564,
+      "y": 990,
+      "temps": 5.01088547706604
+    },
+    {
+      "type": "clic_souris",
+      "x": 1564,
+      "y": 990,
+      "bouton": "Button.left",
+      "presse": true,
+      "temps": 5.196293830871582
+    },
+    {
+      "type": "clic_souris",
+      "x": 1564,
+      "y": 990,
+      "bouton": "Button.left",
+      "presse": false,
+      "temps": 5.300016164779663
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1562,
+      "y": 989,
+      "temps": 6.154796600341797
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1558,
+      "y": 984,
+      "temps": 6.163193464279175
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1556,
+      "y": 979,
+      "temps": 6.171067714691162
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1554,
+      "y": 966,
+      "temps": 6.178924798965454
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1548,
+      "y": 954,
+      "temps": 6.187778949737549
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1541,
+      "y": 941,
+      "temps": 6.19461727142334
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1538,
+      "y": 927,
+      "temps": 6.203005075454712
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1532,
+      "y": 912,
+      "temps": 6.210895776748657
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1527,
+      "y": 899,
+      "temps": 6.219728946685791
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1522,
+      "y": 883,
+      "temps": 6.2271270751953125
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1517,
+      "y": 870,
+      "temps": 6.234937429428101
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1514,
+      "y": 858,
+      "temps": 6.24378228187561
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1511,
+      "y": 845,
+      "temps": 6.251164436340332
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1510,
+      "y": 837,
+      "temps": 6.2590343952178955
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1508,
+      "y": 827,
+      "temps": 6.266993999481201
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1507,
+      "y": 816,
+      "temps": 6.274807453155518
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1507,
+      "y": 808,
+      "temps": 6.283644199371338
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1504,
+      "y": 798,
+      "temps": 6.291027307510376
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1502,
+      "y": 787,
+      "temps": 6.298887729644775
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1501,
+      "y": 777,
+      "temps": 6.3072381019592285
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1499,
+      "y": 765,
+      "temps": 6.315049886703491
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1499,
+      "y": 753,
+      "temps": 6.322905540466309
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1496,
+      "y": 742,
+      "temps": 6.331741571426392
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1495,
+      "y": 726,
+      "temps": 6.339123010635376
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1493,
+      "y": 712,
+      "temps": 6.346972465515137
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1492,
+      "y": 702,
+      "temps": 6.354783296585083
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1489,
+      "y": 693,
+      "temps": 6.363675594329834
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1486,
+      "y": 684,
+      "temps": 6.371063709259033
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1481,
+      "y": 675,
+      "temps": 6.378921747207642
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1478,
+      "y": 665,
+      "temps": 6.387270927429199
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1477,
+      "y": 655,
+      "temps": 6.395082950592041
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1472,
+      "y": 642,
+      "temps": 6.402934789657593
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1471,
+      "y": 630,
+      "temps": 6.410798072814941
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1466,
+      "y": 619,
+      "temps": 6.419162273406982
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1463,
+      "y": 609,
+      "temps": 6.4270100593566895
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1460,
+      "y": 598,
+      "temps": 6.434821367263794
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1457,
+      "y": 591,
+      "temps": 6.443652391433716
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1457,
+      "y": 587,
+      "temps": 6.451038837432861
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1455,
+      "y": 585,
+      "temps": 6.4589009284973145
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1453,
+      "y": 580,
+      "temps": 6.467293977737427
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1452,
+      "y": 578,
+      "temps": 6.475107908248901
+    },
+    {
+      "type": "mouvement_souris",
+      "x": 1451,
+      "y": 576,
+      "temps": 6.482963800430298
+    }
+  ]
+}

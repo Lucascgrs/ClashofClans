@@ -1,0 +1,10 @@
+# Ignorer tout par défaut
+.idea
+.env
+
+# Mais garder les répertoires (pour descendre dans l'arborescence)
+!Actions/
+
+# Ne pas ignorer les fichiers Python
+!*.py
+!player_tags.txt
