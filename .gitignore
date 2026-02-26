@@ -1,6 +1,8 @@
 # Ignorer tout par défaut
 .idea
 .env
+*.parquet
+*.xlsx
 
 # Mais garder les répertoires (pour descendre dans l'arborescence)
 !Actions/

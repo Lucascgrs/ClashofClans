@@ -1059,14 +1059,14 @@ if __name__ == "__main__":
     # scan_players_incremental(max_new_players=2000, condition=True)
 
     # --- Scan joueurs sans filtre ---
-    # scan_players_incremental(max_new_players=100000, condition=False)
+    scan_players_incremental(max_new_players=1000, condition=False)
 
     # --- Mise à jour des joueurs en positions 0 à 500 ---
     # update_players_range(from_pos=0, to_pos=500)
 
     # --- Export ponctuel vers Excel (pour consultation) ---
-    #export_to_excel(FILE_ALL_CLANS)
-    export_to_excel(FILE_ALL_PLAYERS)
+    # export_to_excel(FILE_ALL_CLANS)
+    # export_to_excel(FILE_ALL_PLAYERS)
 
     # --- Espionner son clan ---
     # spy_my_clan()
