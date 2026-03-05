@@ -230,6 +230,28 @@ def export_to_excel(file_path: str):
     logging.info(f"Export terminé → {out_path}")
 
 
+def export_to_excel_in_chunks(file_path: str, max_rows: int = 1048576):
+    df = _read_data(file_path)
+    total_rows = len(df)
+
+    # Reserve 1 row for the header → max data rows per sheet = max_rows - 1
+    effective_max = max_rows - 1
+
+    if total_rows > effective_max:
+        num_chunks = (total_rows + effective_max - 1) // effective_max  # Ceiling division
+        for i in range(num_chunks):
+            chunk = df.iloc[i * effective_max: (i + 1) * effective_max]
+            out_path = file_path.replace(".xlsx", f"_part_{i + 1}.xlsx")
+            with Timer(f"export Excel chunk {i + 1} ({len(chunk)} lignes)"):
+                chunk.to_excel(out_path, index=False)
+            logging.info(f"Export terminé → {out_path}")
+    else:
+        out_path = file_path.replace(".xlsx", "_export.xlsx")
+        with Timer(f"export Excel {out_path} ({len(df)} lignes)"):
+            df.to_excel(out_path, index=False)
+        logging.info(f"Export terminé → {out_path}")
+
+
 # =============================================================================
 # GESTION DE LA PROGRESSION (_meta stocké dans le xlsx)
 # =============================================================================
@@ -286,7 +308,7 @@ def _extract_clan_row(clan: dict, timestamp: str) -> dict:
 
 
 def _fetch_clans_for_prefix(prefix: str, page_size: int,
-                             location_id: int | None) -> tuple[str, list[dict], int]:
+                             location_id: int) -> tuple[str, list[dict], int]:
     """
     Récupère TOUS les clans pour un préfixe donné (toutes les pages).
     Retourne (prefix, clans, nb_requêtes) pour les stats de chrono.
@@ -323,7 +345,7 @@ def _fetch_clans_for_prefix(prefix: str, page_size: int,
 def scan_clans_incremental(max_new_clans: int = 1000,
                            page_size: int = 100,
                            file_path: str = FILE_ALL_CLANS,
-                           location_id: int | None = None,
+                           location_id: int = None,
                            max_workers: int = 10,
                            batch_size: int = 50) -> pd.DataFrame:
     """
@@ -497,7 +519,7 @@ def filter_player(m: dict) -> bool:
 
 
 def _get_clan_members_paged(clan_tag: str, page_size: int = 100,
-                             after_cursor: str | None = None) -> tuple[list[dict], str | None]:
+                             after_cursor: str = None) -> tuple[list[dict], str]:
     """Récupère une page de membres d'un clan. Retourne (membres, next_cursor)."""
     tag_enc = clan_tag.replace("#", "%23")
     params  = {"limit": page_size}
@@ -1059,14 +1081,16 @@ if __name__ == "__main__":
     # scan_players_incremental(max_new_players=2000, condition=True)
 
     # --- Scan joueurs sans filtre ---
-    scan_players_incremental(max_new_players=1000, condition=False)
+    scan_players_incremental(max_new_players=100000, condition=False)
 
     # --- Mise à jour des joueurs en positions 0 à 500 ---
     # update_players_range(from_pos=0, to_pos=500)
 
     # --- Export ponctuel vers Excel (pour consultation) ---
-    # export_to_excel(FILE_ALL_CLANS)
-    # export_to_excel(FILE_ALL_PLAYERS)
+    # export_to_excel_in_chunks(FILE_ALL_CLANS)
+    export_to_excel_in_chunks(FILE_ALL_PLAYERS)
 
     # --- Espionner son clan ---
     # spy_my_clan()
+    from PlayActions import attaque_with_all_accounts
+    # attaque_with_all_accounts(0,25,0,allow_ptitlulu=True)

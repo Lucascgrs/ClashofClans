@@ -287,7 +287,7 @@ class OCR:
             print(self.dict_ameliorations)
 
 
-def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9, allow_tilu=False, allow_ptitlulu=True, allow_lucas=True, allow_citeor=True):
+def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9, allow_tilu=False, allow_ptitlulu=False, allow_lucas=False, allow_citeor=False):
     for k in range(1):
         if allow_ptitlulu:
             LecteurPosition(fichier_entree="switchptitlulu.json").rejouer()
