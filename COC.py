@@ -25,6 +25,7 @@ import string
 import sys
 import pandas as pd
 import os
+import json
 import time
 import pyautogui
 import pyperclip
@@ -48,6 +49,64 @@ logging.basicConfig(
 )
 
 API_TOKEN = get_or_create_token()
+
+# --- CONFIGURATION FILTRES (Modifiée par le GUI) ---
+FILTER_CONFIG = {
+    "min_townhall": 13,
+    "min_xp": 0,
+    "min_trophies": 0,
+    "min_donations": 0,
+    "exclude_unranked": True,
+    "require_activity": True,  # dons > 0 ou reçus > 0
+    "location_id": 32000087
+}
+
+# --- CONFIGURATION COORDONNÉES ---
+COORDS_FILE = "coords_config.json"
+DEFAULT_COORDS = {
+    "profil": [75, 62],
+    "social": [1438, 91],
+    "recherchedejoueurs": [1450, 200],
+    "escape": [5, 5],
+    "fill": [1100, 300],
+    "invite": [600, 570]
+}
+
+def load_coords():
+    if not os.path.exists(COORDS_FILE):
+        return DEFAULT_COORDS
+    try:
+        with open(COORDS_FILE, 'r') as f:
+            return json.load(f)
+    except:
+        return DEFAULT_COORDS
+
+def save_coords(coords):
+    with open(COORDS_FILE, 'w') as f:
+        json.dump(coords, f, indent=4)
+
+# Dictionnaire de mapping pour l'interface
+LOCATIONS_DICT = {
+    "France": 32000087,
+    "International": 32000006,
+    "United States": 32000249,
+    "China": 32000056,
+    "United Kingdom": 32000248,
+    "Germany": 32000094,
+    "India": 32000113,
+    "Russia": 32000195,
+    "Japan": 32000126,
+    "Indonesia": 32000114,
+    "Brazil": 32000038,
+    "Canada": 32000045,
+    "Australia": 32000021,
+    "Italy": 32000122,
+    "Spain": 32000218,
+    "Turkey": 32000236,
+    "Netherlands": 32000166,
+    "Philippines": 32000185,
+}
+
 HEADERS   = {"Authorization": f"Bearer {API_TOKEN}", "Accept": "application/json"}
 
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -56,6 +115,30 @@ sys.stdout.reconfigure(encoding="utf-8")
 API_URL             = "https://api.clashofclans.com/v1"
 LOCATION_FRANCE     = 32000087
 DEFAULT_MAX_WORKERS = 50
+
+# --- MAPPING LOCATIONS (Pour le GUI) ---
+LOCATIONS_MAP = {
+    "France": 32000087,
+    "International": 32000206,
+    "United States": 32000249,
+    "China": 32000052,
+    "Germany": 32000094,
+    "United Kingdom": 32000247,
+    "Spain": 32000219,
+    "Canada": 32000045,
+    "India": 32000113,
+    "Indonesia": 32000114,
+    "Japan": 32000122,
+    "South Korea": 32000135,
+    "Brazil": 32000032,
+    "Russia": 32000199,
+    "Turkey": 32000236,
+    "Italy": 32000119,
+    "Australia": 32000016,
+    "Netherlands": 32000166,
+    "Poland": 32000185,
+    "Philippines": 32000183
+}
 
 # Fichiers de stockage
 # Les données volumineuses sont en .parquet ; les métadonnées restent en .xlsx
@@ -215,21 +298,6 @@ def _excel_write_sheet(file_path: str, sheet_name: str, df: pd.DataFrame):
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
 
-def export_to_excel(file_path: str):
-    """
-    Export ponctuel parquet → xlsx pour consultation dans Excel.
-    Ne modifie pas le parquet source.
-
-    Exemple :
-        export_to_excel(FILE_ALL_CLANS)    # génère All_Clans_export.xlsx
-    """
-    df       = _read_data(file_path)
-    out_path = file_path.replace(".xlsx", "_export.xlsx")
-    with Timer(f"export Excel {os.path.basename(out_path)} ({len(df)} lignes)"):
-        df.to_excel(out_path, index=False)
-    logging.info(f"Export terminé → {out_path}")
-
-
 def export_to_excel_in_chunks(file_path: str, max_rows: int = 1048576):
     df = _read_data(file_path)
     total_rows = len(df)
@@ -347,7 +415,8 @@ def scan_clans_incremental(max_new_clans: int = 1000,
                            file_path: str = FILE_ALL_CLANS,
                            location_id: int = None,
                            max_workers: int = 10,
-                           batch_size: int = 50) -> pd.DataFrame:
+                           batch_size: int = 50,
+                           progress_callback=None) -> pd.DataFrame:
     """
     Scan incrémental de clans — version parallélisée par batch.
 
@@ -432,6 +501,8 @@ def scan_clans_incremental(max_new_clans: int = 1000,
                                     fetched       += 1
                                     batch_fetched += 1
                                     pbar.update(1)
+                                    if progress_callback:
+                                        progress_callback(min(fetched, max_new_clans), max_new_clans)
 
                 # FIX 1 : vérification APRÈS le batch complet → respect de max_new_clans
                 # FIX 2 : on enregistre le dernier préfixe du batch entier (déterministe)
@@ -508,13 +579,36 @@ def _extract_member_row(member: dict, clan_tag: str, timestamp: str) -> dict:
 
 
 def filter_player(m: dict) -> bool:
-    """Retourne True si le membre correspond aux critères de recrutement."""
-    if m.get("townHallLevel", 0) < 16:
+    """Retourne True si le membre correspond aux critères (basé sur FILTER_CONFIG)."""
+    cfg = FILTER_CONFIG
+    
+    # Vérification HDV
+    if m.get("townHallLevel", 0) < cfg.get("min_townhall", 0):
         return False
-    if m.get("league", {}).get("name") == "Unranked":
+        
+    # Vérification XP
+    if m.get("expLevel", 0) < cfg.get("min_xp", 0):
         return False
-    if m.get("donations", 0) == 0 and m.get("donationsReceived", 0) == 0:
+        
+    # Vérification Ligue
+    league_name = m.get("league", {}).get("name", "Unranked")
+    if cfg.get("exclude_unranked", False) and league_name == "Unranked":
         return False
+        
+    # Vérification Trophées
+    if m.get("trophies", 0) < cfg.get("min_trophies", 0):
+        return False
+
+    # Vérification Dons (Activité)
+    don = m.get("donations", 0)
+    rec = m.get("donationsReceived", 0)
+    
+    if don < cfg.get("min_donations", 0):
+        return False
+        
+    if cfg.get("require_activity", True) and don == 0 and rec == 0:
+        return False
+        
     return True
 
 
@@ -571,7 +665,8 @@ def scan_players_incremental(max_new_players: int = 2000,
                              clans_file: str = FILE_ALL_CLANS,
                              players_file: str = FILE_ALL_PLAYERS,
                              max_workers: int = 10,
-                             batch_size: int = 50) -> pd.DataFrame:
+                             batch_size: int = 50,
+                             progress_callback=None) -> pd.DataFrame:
     """
     Scan incrémental de joueurs — version parallélisée par batch.
     """
@@ -651,6 +746,8 @@ def scan_players_incremental(max_new_players: int = 2000,
                                     fetched       += 1
                                     batch_fetched += 1
                                     pbar.update(1)
+                                    if progress_callback:
+                                        progress_callback(min(fetched, max_new_players), max_new_players)
 
                 # FIX 2 : enregistrement après le batch complet
                 last_saved_idx = batch_last_idx
@@ -769,10 +866,16 @@ def update_players_range(from_pos: int = 0, to_pos: int = 100,
 # =============================================================================
 
 def search_clans(name: str, limit: int, locationId: bool = True) -> list[str]:
-    """Recherche des clans par nom avec filtre France optionnel. Retourne les tags."""
+    """Recherche des clans par nom avec filtre Location (depuis config). Retourne les tags."""
     params = {"name": name, "limit": limit}
     if locationId:
-        params["locationId"] = LOCATION_FRANCE
+        # On utilise l'ID défini dans la configuration globale
+        try:
+            val = int(FILTER_CONFIG.get("location_id", LOCATION_FRANCE))
+            params["locationId"] = val
+        except:
+             params["locationId"] = LOCATION_FRANCE
+             
     r = safe_get(f"{API_URL}/clans", HEADERS, params)
     if not r:
         return []
@@ -907,24 +1010,17 @@ def save_tags_to_txt(tags: list[str], path: str = FILE_PLAYER_TAGS):
 
 def automate_coc_input(text: str):
     """
-    Envoie un tag de joueur via l'interface CoC (chat → recherche → invitation).
-    ⚠️ Les coordonnées sont à adapter à votre résolution d'écran.
+    Envoie un tag de joueur via l'interface CoC.
+    Charge les coordonnées dynamiques depuis le fichier JSON.
     """
     def wait():
         time.sleep(random.uniform(0.5, 1.0))
 
-    coords = {
-        "chat"      : (75, 62),
-        "search_btn": (1438, 91),
-        "input_zone": (1450, 200),
-        "escape"    : (5, 5),
-        "fill"      : (1100, 300),
-        "invite"    : (600, 570),
-    }
+    coords = load_coords()
 
-    pyautogui.click(*coords["chat"])      ; wait()
-    pyautogui.click(*coords["search_btn"]); wait()
-    pyautogui.click(*coords["input_zone"]); wait()
+    pyautogui.click(*coords["profil"])      ; wait()
+    pyautogui.click(*coords["social"])      ; wait()
+    pyautogui.click(*coords["recherchedejoueurs"]); wait()
     pyautogui.click(*coords["fill"])      ; wait()
 
     pyperclip.copy(text)
@@ -1069,7 +1165,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------
 
     # --- Méthode aléatoire (originale) ---
-    # invite(200, 30, inviting=True, condition=True, searching_players=True)
+    invite(200, 30, inviting=True, condition=True, searching_players=True)
 
     # --- Scan incrémental de clans (monde entier) ---
     # scan_clans_incremental(max_new_clans=5000)
@@ -1081,14 +1177,14 @@ if __name__ == "__main__":
     # scan_players_incremental(max_new_players=2000, condition=True)
 
     # --- Scan joueurs sans filtre ---
-    scan_players_incremental(max_new_players=100000, condition=False)
+    scan_players_incremental(max_new_players=5000, condition=False)
 
     # --- Mise à jour des joueurs en positions 0 à 500 ---
     # update_players_range(from_pos=0, to_pos=500)
 
     # --- Export ponctuel vers Excel (pour consultation) ---
     # export_to_excel_in_chunks(FILE_ALL_CLANS)
-    export_to_excel_in_chunks(FILE_ALL_PLAYERS)
+    #export_to_excel_in_chunks(FILE_ALL_PLAYERS)
 
     # --- Espionner son clan ---
     # spy_my_clan()
