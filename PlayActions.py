@@ -287,137 +287,80 @@ class OCR:
             print(self.dict_ameliorations)
 
 
-def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9, allow_tilu=False, allow_ptitlulu=False, allow_lucas=False, allow_citeor=False):
-    for k in range(1):
-        if allow_ptitlulu:
-            LecteurPosition(fichier_entree="switchptitlulu.json").rejouer()
+def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9, 
+                              strategy_file="attaquehdv13+4herosbis.json", 
+                              night_strategy_file="attaquenightMDO9.json",
+                              allow_tilu=None, allow_ptitlulu=None, 
+                              allow_lucas=None, allow_citeor=None,
+                              custom_accounts_list=None):
+    """
+    Lance les attaques sur les comptes sélectionnés avec les stratégies choisies.
+    custom_accounts_list : liste de tuples (True, "fichier_switch.json")
+    """
+    if custom_accounts_list:
+        actions_to_run = custom_accounts_list
+    else:
+        # Rétrocompatibilité
+        actions_to_run = [
+            (allow_ptitlulu, "switchptitlulu.json"),
+            (allow_tilu, "switchtilu.json"),
+            (allow_citeor, "switchciteor.json"),
+            (allow_lucas, "switch_lucas_.json")
+        ]
+    
+    # Liste pour définir si on doit changer d'armée (spécifique à Tilu dans votre code original)
+    # Adaptez si besoin pour les autres
+    
+    for allow, switch_json in actions_to_run:
+        if allow:
+            print(f"--- Connexion : {switch_json} ---")
+            LecteurPosition(fichier_entree=switch_json).rejouer()
             time.sleep(3)
             LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
+            
+            # Sélection armée 1 (Standard)
             LecteurPosition(fichier_entree="selectfirstarmy.json").rejouer()
             LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
             time.sleep(1)
-            for i in range(defaites):
-                LecteurPosition(fichier_entree="lose.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            for i in range(attaques):
-                LecteurPosition(fichier_entree="attaquehdv13+4herosbis.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
+            
+            # Phase : Perdre des trophées
+            if defaites > 0:
+                print(f"Lancement de {defaites} défaites...")
+                for i in range(defaites):
+                    LecteurPosition(fichier_entree="lose.json").rejouer()
+                    time.sleep(3)
+                    LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
+            
+            # Phase : Attaques principales
+            if attaques > 0:
+                print(f"Lancement de {attaques} attaques avec {strategy_file}...")
+                for i in range(attaques):
+                    LecteurPosition(fichier_entree=strategy_file).rejouer()
+                    time.sleep(3)
+                    LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
 
+            # Cas particulier Tilu (Switch army) - Optionnel, à garder si nécessaire
+            if "tilu" in switch_json and allow_tilu:
+                 LecteurPosition(fichier_entree="selectsecondarmy.json").rejouer()
+
+            # Phase : Attaques de nuit
             if attaques_night > 0:
+                print(f"Lancement de {attaques_night} attaques nuit avec {night_strategy_file}...")
                 LecteurPosition(fichier_entree="clicnightboat.json").rejouer()
                 time.sleep(3)
                 for i in range(attaques_night):
-                    LecteurPosition(fichier_entree="attaquenightMDO9.json").rejouer()
+                    LecteurPosition(fichier_entree=night_strategy_file).rejouer()
                     time.sleep(3)
                     LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
                     time.sleep(3)
-                    LecteurPosition(fichier_entree="getnightelexir.json").rejouer()
+                    try: 
+                        LecteurPosition(fichier_entree="getnightelexir.json").rejouer()
+                    except:
+                        pass
+                
                 time.sleep(2)
                 LecteurPosition(fichier_entree="clicnormalboat.json").rejouer()
                 time.sleep(3)
-
-            # OCR().upgrade_wall()
-
-        # ----------------------------------------------------
-        if allow_tilu:
-            LecteurPosition(fichier_entree="switchtilu.json").rejouer()
-            time.sleep(3)
-            LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            LecteurPosition(fichier_entree="selectfirstarmy.json").rejouer()
-            LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            time.sleep(1)
-            for i in range(defaites):
-                LecteurPosition(fichier_entree="lose.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            for i in range(attaques):
-                LecteurPosition(fichier_entree="attaquehdv13+4heros.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-
-            LecteurPosition(fichier_entree="selectsecondarmy.json").rejouer()
-
-            if attaques_night > 0:
-                LecteurPosition(fichier_entree="clicnightboat.json").rejouer()
-                time.sleep(3)
-                for i in range(attaques_night):
-                    LecteurPosition(fichier_entree="attaquenightMDO9.json").rejouer()
-                    time.sleep(3)
-                    LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-                    time.sleep(3)
-                    LecteurPosition(fichier_entree="getnightelexir.json").rejouer()
-                time.sleep(2)
-                LecteurPosition(fichier_entree="clicnormalboat.json").rejouer()
-                time.sleep(3)
-
-            # OCR().upgrade_wall()
-
-        # ----------------------------------------------------
-        if allow_citeor:
-            LecteurPosition(fichier_entree="switchciteor.json").rejouer()
-            time.sleep(3)
-            LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            LecteurPosition(fichier_entree="selectfirstarmy.json").rejouer()
-            LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            time.sleep(1)
-            for i in range(defaites):
-                LecteurPosition(fichier_entree="lose.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            for i in range(attaques):
-                LecteurPosition(fichier_entree="attaquehdv11+3heros.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-
-            if attaques_night > 0:
-                LecteurPosition(fichier_entree="clicnightboat.json").rejouer()
-                time.sleep(3)
-                for i in range(attaques_night):
-                    LecteurPosition(fichier_entree="attaquenightMDO5.json").rejouer()
-                    time.sleep(3)
-                    LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-                    time.sleep(3)
-                    LecteurPosition(fichier_entree="getnightelexir.json").rejouer()
-                time.sleep(2)
-                LecteurPosition(fichier_entree="clicnormalboat.json").rejouer()
-                time.sleep(3)
-
-            # OCR().upgrade_wall()
-
-        # ----------------------------------------------------
-
-        if allow_lucas:
-            LecteurPosition(fichier_entree="switch_lucas_.json").rejouer()
-            time.sleep(3)
-            LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            LecteurPosition(fichier_entree="selectfirstarmy.json").rejouer()
-            LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            time.sleep(1)
-            for i in range(defaites):
-                LecteurPosition(fichier_entree="lose.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            for i in range(attaques):
-                LecteurPosition(fichier_entree="attaque_lucas_.json").rejouer()
-                time.sleep(3)
-                LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-
-            if attaques_night > 0:
-                LecteurPosition(fichier_entree="clicnightboat.json").rejouer()
-                time.sleep(3)
-                for i in range(attaques_night):
-                    LecteurPosition(fichier_entree="attaquehdv9+1heros.json").rejouer()
-                    time.sleep(3)
-                    LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-                    time.sleep(3)
-                    LecteurPosition(fichier_entree="getnightelexir.json").rejouer()
-                time.sleep(2)
-                LecteurPosition(fichier_entree="clicnormalboat.json").rejouer()
-                time.sleep(3)
-
-            # OCR().upgrade_wall()
             
             
 #LecteurPosition(fichier_entree="C:\\Users\\LucasCONGRAS\\PycharmProjects\\PythonProject\\PROJECT\\test.json").rejouer()
