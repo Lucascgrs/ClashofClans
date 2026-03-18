@@ -48,84 +48,96 @@ class CLASH_GUI(tk.Tk):
         grid_frame = ttk.Frame(lf_filters)
         grid_frame.pack(fill="x", padx=5, pady=5)
 
-        # Paramètres
         self.vars = {
-            "min_townhall": tk.IntVar(value=COC.FILTER_CONFIG["min_townhall"]),
-            "min_xp": tk.IntVar(value=COC.FILTER_CONFIG["min_xp"]),
-            "min_trophies": tk.IntVar(value=COC.FILTER_CONFIG["min_trophies"]),
-            "min_donations": tk.IntVar(value=COC.FILTER_CONFIG["min_donations"]),
-            "exclude_unranked": tk.BooleanVar(value=COC.FILTER_CONFIG["exclude_unranked"]),
-            "require_activity": tk.BooleanVar(value=COC.FILTER_CONFIG["require_activity"]),
-            "location_name": tk.StringVar(value="France"),
+            "min_townhall"      : tk.IntVar(value=COC.FILTER_CONFIG["min_townhall"]),
+            "min_xp"            : tk.IntVar(value=COC.FILTER_CONFIG["min_xp"]),
+            "min_trophies"      : tk.IntVar(value=COC.FILTER_CONFIG["min_trophies"]),
+            "min_donations"     : tk.IntVar(value=COC.FILTER_CONFIG["min_donations"]),
+            "exclude_unranked"  : tk.BooleanVar(value=COC.FILTER_CONFIG["exclude_unranked"]),
+            "require_activity"  : tk.BooleanVar(value=COC.FILTER_CONFIG["require_activity"]),
             "scan_limit_players": tk.IntVar(value=2000),
-            "scan_limit_clans": tk.IntVar(value=1000),
-            
-            # Paramètres Invitation Aléatoire
-            "rand_diff_names": tk.IntVar(value=10),
+            "scan_limit_clans"  : tk.IntVar(value=1000),
+            "rand_diff_names"   : tk.IntVar(value=10),
             "rand_clans_per_name": tk.IntVar(value=10),
-            "rand_do_search": tk.BooleanVar(value=True),
-            "rand_do_invite": tk.BooleanVar(value=False)
+            "rand_do_search"    : tk.BooleanVar(value=True),
+            "rand_do_invite"    : tk.BooleanVar(value=False),
         }
 
-        # Grid Layout
         ttk.Label(grid_frame, text="HDV Min:").grid(row=0, column=0, sticky="w")
         ttk.Entry(grid_frame, textvariable=self.vars["min_townhall"], width=10).grid(row=0, column=1, padx=5)
-
         ttk.Label(grid_frame, text="XP Min:").grid(row=0, column=2, sticky="w")
         ttk.Entry(grid_frame, textvariable=self.vars["min_xp"], width=10).grid(row=0, column=3, padx=5)
-
         ttk.Label(grid_frame, text="Trophées Min:").grid(row=0, column=4, sticky="w")
         ttk.Entry(grid_frame, textvariable=self.vars["min_trophies"], width=10).grid(row=0, column=5, padx=5)
-
         ttk.Label(grid_frame, text="Dons Min:").grid(row=1, column=0, sticky="w", pady=5)
         ttk.Entry(grid_frame, textvariable=self.vars["min_donations"], width=10).grid(row=1, column=1, padx=5)
-
         ttk.Checkbutton(grid_frame, text="Exclure Non-Classés", variable=self.vars["exclude_unranked"]).grid(row=1, column=2, columnspan=2)
         ttk.Checkbutton(grid_frame, text="Requiert Activité (Dons > 0)", variable=self.vars["require_activity"]).grid(row=1, column=4, columnspan=2)
-        
-        # --- Zone Actions Scan Incremental ---
+
+        # --- Zone Pays (multi-sélection) ---
+        lf_countries = ttk.LabelFrame(frame, text="Pays à scanner (Ctrl+clic = multi-sélection)")
+        lf_countries.pack(fill="x", padx=10, pady=5)
+
+        f_countries = ttk.Frame(lf_countries)
+        f_countries.pack(fill="x", padx=5, pady=5)
+
+        scroll_c = ttk.Scrollbar(f_countries, orient="vertical")
+        self.lb_countries = tk.Listbox(
+            f_countries, selectmode="extended",
+            height=6, yscrollcommand=scroll_c.set, exportselection=False
+        )
+        scroll_c.config(command=self.lb_countries.yview)
+        scroll_c.pack(side="right", fill="y")
+        self.lb_countries.pack(side="left", fill="x", expand=True)
+
+        country_list = sorted(COC.LOCATIONS_DICT.keys())
+        for c in country_list:
+            self.lb_countries.insert("end", c)
+
+        # Sélectionner France par défaut
+        if "France" in country_list:
+            idx = country_list.index("France")
+            self.lb_countries.selection_set(idx)
+
+        f_btn_c = ttk.Frame(lf_countries)
+        f_btn_c.pack(fill="x", padx=5, pady=2)
+        ttk.Button(f_btn_c, text="Tout sélectionner",
+                   command=lambda: self.lb_countries.select_set(0, tk.END)).pack(side="left", padx=5)
+        ttk.Button(f_btn_c, text="Tout désélectionner",
+                   command=lambda: self.lb_countries.selection_clear(0, tk.END)).pack(side="left", padx=5)
+        ttk.Button(f_btn_c, text="🌐 MAJ Pays (API)",
+                   command=self.update_locations).pack(side="left", padx=5)
+
+        # --- Zone Actions Scan Incrémental ---
         lf_actions = ttk.LabelFrame(frame, text="Lancer un Scan Incrémental (Méthode 1)")
         lf_actions.pack(fill="x", padx=10, pady=5)
 
-        # Scan Joueurs
         f_scan_p = ttk.Frame(lf_actions)
         f_scan_p.pack(fill="x", pady=2)
         ttk.Button(f_scan_p, text="Lancer Scan Joueurs", command=self.run_player_scan).pack(side="left", padx=10)
         ttk.Label(f_scan_p, text="Limite:").pack(side="left")
         ttk.Entry(f_scan_p, textvariable=self.vars["scan_limit_players"], width=8).pack(side="left", padx=5)
 
-        # Scan Clans
         f_scan_c = ttk.Frame(lf_actions)
         f_scan_c.pack(fill="x", pady=2)
         ttk.Button(f_scan_c, text="Lancer Scan Clans", command=self.run_clan_scan).pack(side="left", padx=10)
         ttk.Label(f_scan_c, text="Limite:").pack(side="left")
         ttk.Entry(f_scan_c, textvariable=self.vars["scan_limit_clans"], width=8).pack(side="left", padx=5)
-        
-        ttk.Label(f_scan_c, text="Pays:").pack(side="left", padx=5)
-        country_list = list(COC.LOCATIONS_DICT.keys())
-        country_list.sort()
-        self.cb_country = ttk.Combobox(f_scan_c, textvariable=self.vars["location_name"], values=country_list, state="readonly", width=15)
-        self.cb_country.pack(side="left", padx=5)
-        
-        # Bouton Update Locations
-        ttk.Button(f_scan_c, text="🌐 MAJ Pays", command=self.update_locations).pack(side="left", padx=5)
 
         # --- Zone Invitation Aléatoire ---
         lf_rand = ttk.LabelFrame(frame, text="Recherche Aléatoire & Invitation (Méthode 2)")
         lf_rand.pack(fill="x", padx=10, pady=10)
-        
+
         f_rand = ttk.Frame(lf_rand)
         f_rand.pack(fill="x", padx=5, pady=5)
-        
+
         ttk.Label(f_rand, text="Nb préfixes aléatoires:").grid(row=0, column=0, sticky="w")
         ttk.Entry(f_rand, textvariable=self.vars["rand_diff_names"], width=5).grid(row=0, column=1, padx=5)
-        
         ttk.Label(f_rand, text="Clans par préfixe:").grid(row=0, column=2, sticky="w")
         ttk.Entry(f_rand, textvariable=self.vars["rand_clans_per_name"], width=5).grid(row=0, column=3, padx=5)
-        
         ttk.Checkbutton(f_rand, text="Chercher Joueurs", variable=self.vars["rand_do_search"]).grid(row=1, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(f_rand, text="Inviter Automatiquement", variable=self.vars["rand_do_invite"]).grid(row=1, column=2, columnspan=2, sticky="w")
-        
+
         ttk.Button(lf_rand, text="🚀 LANCER Recherche/Invitation", command=self.run_random_invite).pack(fill="x", padx=5, pady=5)
 
         # Barre de progression
@@ -133,8 +145,7 @@ class CLASH_GUI(tk.Tk):
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(frame, variable=self.progress_var, maximum=100)
         self.progress.pack(fill="x", padx=10, pady=5)
-        
-        # Bouton Configuration Coordonnées
+
         ttk.Button(frame, text="⚙️ Configurer Coordonnées & Souris", command=self.configure_coords_window).pack(pady=5)
 
     def create_tags_tab(self):
@@ -351,21 +362,24 @@ class CLASH_GUI(tk.Tk):
 
     def update_coc_config(self):
         """Met à jour la config globale de COC avec les valeurs du GUI"""
-        COC.FILTER_CONFIG["min_townhall"] = self.vars["min_townhall"].get()
-        COC.FILTER_CONFIG["min_xp"] = self.vars["min_xp"].get()
-        COC.FILTER_CONFIG["min_trophies"] = self.vars["min_trophies"].get()
-        COC.FILTER_CONFIG["min_donations"] = self.vars["min_donations"].get()
+        COC.FILTER_CONFIG["min_townhall"]     = self.vars["min_townhall"].get()
+        COC.FILTER_CONFIG["min_xp"]           = self.vars["min_xp"].get()
+        COC.FILTER_CONFIG["min_trophies"]     = self.vars["min_trophies"].get()
+        COC.FILTER_CONFIG["min_donations"]    = self.vars["min_donations"].get()
         COC.FILTER_CONFIG["exclude_unranked"] = self.vars["exclude_unranked"].get()
         COC.FILTER_CONFIG["require_activity"] = self.vars["require_activity"].get()
-        
-        # Mapping Pays -> ID
-        c_name = self.vars["location_name"].get()
-        if c_name in COC.LOCATIONS_DICT:
-            COC.FILTER_CONFIG["location_id"] = COC.LOCATIONS_DICT[c_name]
-        else:
-             COC.FILTER_CONFIG["location_id"] = 32000087 # Defaut
-             
-        self.log(f"Config MAJ: Pays={c_name} (ID={COC.FILTER_CONFIG['location_id']})")
+
+        # Récupérer tous les pays sélectionnés dans la Listbox
+        selected_names = [self.lb_countries.get(i) for i in self.lb_countries.curselection()]
+        selected_ids   = [COC.LOCATIONS_DICT[c] for c in selected_names if c in COC.LOCATIONS_DICT]
+
+        if not selected_ids:
+            selected_ids = [32000087]  # France par défaut si rien sélectionné
+
+        COC.FILTER_CONFIG["location_ids"] = selected_ids
+        COC.FILTER_CONFIG["location_id"]  = selected_ids[0]  # compatibilité
+
+        self.log(f"Pays sélectionnés : {selected_names}")
 
     def update_progress(self, current, total):
         if total > 0:
@@ -456,21 +470,32 @@ class CLASH_GUI(tk.Tk):
 
         threading.Thread(target=task).start()
 
+
     def run_clan_scan(self):
-        self.update_coc_config() # Important pour mettre à jour l'ID location
-        limit = self.vars["scan_limit_clans"].get()
-        loc = COC.FILTER_CONFIG["location_id"]
+        self.update_coc_config()
+        limit   = self.vars["scan_limit_clans"].get()
+        loc_ids = COC.FILTER_CONFIG.get("location_ids", [32000087])
         self.progress_var.set(0)
-        
+
         def task():
-            self.log(f"Démarrage scan clans (Limit={limit}, Loc={loc})...")
+            self.log(f"Scan clans sur {len(loc_ids)} pays (limite={limit} par pays)...")
             try:
-                COC.scan_clans_incremental(max_new_clans=limit, location_id=loc, progress_callback=self.update_progress)
-                self.log("Scan clans terminé.")
+                total = len(loc_ids)
+                for i, loc_id in enumerate(loc_ids):
+                    pays = next((k for k, v in COC.LOCATIONS_DICT.items() if v == loc_id), str(loc_id))
+                    self.log(f"  → Scan pays : {pays} ({i+1}/{total})")
+                    COC.scan_clans_incremental(
+                        max_new_clans=limit,
+                        location_id=loc_id,
+                        progress_callback=lambda cur, tot: self.update_progress(
+                            (i / total * 100) + (cur / tot * 100 / total), 100
+                        )
+                    )
+                self.log("✅ Scan clans tous pays terminé.")
                 self.progress_var.set(100)
             except Exception as e:
                 self.log(f"Erreur Scan: {e}")
-        
+
         threading.Thread(target=task).start()
         
     def run_random_invite(self):

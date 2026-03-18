@@ -58,7 +58,8 @@ FILTER_CONFIG = {
     "min_donations": 0,
     "exclude_unranked": True,
     "require_activity": True,  # dons > 0 ou reçus > 0
-    "location_id": 32000087
+    "location_id": 32000087,
+    "location_ids": [32000087]
 }
 
 # --- CONFIGURATION COORDONNÉES ---
@@ -932,17 +933,11 @@ def update_players_range(from_pos: int = 0, to_pos: int = 100,
 # RECHERCHE ALÉATOIRE DE CLANS (méthode originale)
 # =============================================================================
 
-def search_clans(name: str, limit: int, locationId: bool = True) -> list[str]:
-    """Recherche des clans par nom avec filtre Location (depuis config). Retourne les tags."""
+def search_clans(name: str, limit: int, location_id: int = None) -> list[str]:
+    """Recherche des clans par nom avec filtre pays optionnel. Retourne les tags."""
     params = {"name": name, "limit": limit}
-    if locationId:
-        # On utilise l'ID défini dans la configuration globale
-        try:
-            val = int(FILTER_CONFIG.get("location_id", LOCATION_FRANCE))
-            params["locationId"] = val
-        except:
-             params["locationId"] = LOCATION_FRANCE
-             
+    if location_id:
+        params["locationId"] = location_id
     r = safe_get(f"{API_URL}/clans", HEADERS, params)
     if not r:
         return []
@@ -950,10 +945,13 @@ def search_clans(name: str, limit: int, locationId: bool = True) -> list[str]:
 
 
 def random_clan_search(limit: int) -> list[str]:
-    """Génère un préfixe de 3 lettres aléatoires et cherche les clans correspondants."""
-    prefix = "".join(random.choices(string.ascii_uppercase, k=3))
-    logging.info(f"Recherche clans avec préfixe: {prefix}")
-    return search_clans(prefix, limit)
+    """Génère un préfixe aléatoire et cherche dans un pays aléatoire parmi ceux sélectionnés."""
+    prefix   = "".join(random.choices(string.ascii_uppercase, k=3))
+    loc_ids  = FILTER_CONFIG.get("location_ids", [32000087])
+    loc_id   = random.choice(loc_ids) if loc_ids else 32000087
+    pays     = next((k for k, v in LOCATIONS_DICT.items() if v == loc_id), str(loc_id))
+    logging.info(f"Recherche clans avec préfixe: {prefix} | Pays: {pays}")
+    return search_clans(prefix, limit, location_id=loc_id)
 
 
 # =============================================================================
@@ -1066,9 +1064,19 @@ def read_tags_from_txt(path: str = FILE_PLAYER_TAGS) -> list[str]:
 
 
 def save_tags_to_txt(tags: list[str], path: str = FILE_PLAYER_TAGS):
-    """Sauvegarde une liste de tags dans un fichier texte (un par ligne)."""
+    """Sauvegarde une liste de tags dans un fichier texte (un par ligne).
+    Fusionne avec les tags déjà présents pour éviter les pertes en cas de scan parallèle."""
+    # Charger les tags existants
+    existing = set()
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            existing = {line.strip() for line in f if line.strip()}
+
+    # Fusionner avec les nouveaux
+    merged = existing | set(tags)
+
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(tags))
+        f.write("\n".join(sorted(merged)))
 
 
 # =============================================================================
