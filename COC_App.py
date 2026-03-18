@@ -105,6 +105,24 @@ class CLASH_GUI(tk.Tk):
                    command=lambda: self.lb_countries.select_set(0, tk.END)).pack(side="left", padx=5)
         ttk.Button(f_btn_c, text="Tout désélectionner",
                    command=lambda: self.lb_countries.selection_clear(0, tk.END)).pack(side="left", padx=5)
+
+        FRANCOPHONE_IDS = {
+            32000029, 32000047, 32000087, 32000088, 32000089,
+            32000100, 32000107, 32000139, 32000149, 32000152,
+            32000156, 32000167, 32000191, 32000195, 32000199,
+            32000200, 32000226, 32000256
+        }
+
+        def select_francophone():
+            self.lb_countries.selection_clear(0, tk.END)
+            country_list = sorted(COC.LOCATIONS_DICT.keys())
+            for i, name in enumerate(country_list):
+                if COC.LOCATIONS_DICT.get(name) in FRANCOPHONE_IDS:
+                    self.lb_countries.selection_set(i)
+
+        ttk.Button(f_btn_c, text="🇫🇷 Pays Francophones",
+                   command=select_francophone).pack(side="left", padx=5)
+
         ttk.Button(f_btn_c, text="🌐 MAJ Pays (API)",
                    command=self.update_locations).pack(side="left", padx=5)
 
