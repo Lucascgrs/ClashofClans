@@ -11,3 +11,4 @@
 # Ne pas ignorer les fichiers Python
 !*.py
 !player_tags.txt
+__pycache__/
