@@ -1,0 +1,61 @@
+{
+    "zones": {
+        "ouvriers": {
+            "x1": 940,
+            "y1": 39,
+            "x2": 1030,
+            "y2": 80
+        },
+        "or": {
+            "x1": 1515,
+            "y1": 40,
+            "x2": 1815,
+            "y2": 81
+        },
+        "elexir": {
+            "x1": 1515,
+            "y1": 143,
+            "x2": 1815,
+            "y2": 184
+        },
+        "liste_ameliorations": {
+            "x1": 700,
+            "y1": 180,
+            "x2": 1263,
+            "y2": 800
+        }
+    },
+    "buttons": {
+        "info_ouvriers": {
+            "x": 100,
+            "y": 200
+        },
+        "ameliorer_plus": {
+            "x": 1200,
+            "y": 500
+        },
+        "valider_or": {
+            "x": 700,
+            "y": 600
+        },
+        "valider_elexir": {
+            "x": 800,
+            "y": 600
+        },
+        "suivant_page": {
+            "x": 1300,
+            "y": 400
+        },
+        "clic_neutre": {
+            "x": 5,
+            "y": 5
+        }
+    },
+    "params": {
+        "keyword": "Rempart",
+        "max_pages": 6,
+        "delay_click": 2.0,
+        "delay_open_menu": 3.0,
+        "delay_validate": 1.2
+    }
+}

@@ -33,9 +33,13 @@ class CLASH_GUI(tk.Tk):
 
         self.create_scan_tab()
         self.create_game_tab()
+        self.create_walls_tab()
         self.create_data_tab()
         self.create_tags_tab()
         self.create_logs_tab()
+
+        self.walls_stop_event = threading.Event()
+        self.walls_thread = None
 
     def create_scan_tab(self):
         frame = ttk.Frame(self.notebook)
@@ -280,6 +284,280 @@ class CLASH_GUI(tk.Tk):
         
         # Initialiser la liste et les combobox une fois que tout est créé
         self.refresh_action_files()
+
+    def create_walls_tab(self):
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text="🧱 Auto Remparts")
+
+        # --- Paramètres ---
+        lf_params = ttk.LabelFrame(frame, text="Paramètres")
+        lf_params.pack(fill="x", padx=10, pady=10)
+
+        cfg = PlayActions.load_walls_config()
+        p = cfg.get("params", {})
+
+        self.var_walls_keyword = tk.StringVar(value=p.get("keyword", "rempart"))
+        self.var_walls_max_pages = tk.IntVar(value=int(p.get("max_pages", 6)))
+        self.var_walls_loops = tk.IntVar(value=1)
+        self.var_walls_delay_click = tk.DoubleVar(value=float(p.get("delay_click", 0.6)))
+        self.var_walls_delay_menu = tk.DoubleVar(value=float(p.get("delay_open_menu", 1.5)))
+        self.var_walls_delay_valid = tk.DoubleVar(value=float(p.get("delay_validate", 1.2)))
+
+        grid_p = ttk.Frame(lf_params)
+        grid_p.pack(fill="x", padx=5, pady=5)
+        ttk.Label(grid_p, text="Mot-clé :").grid(row=0, column=0, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_keyword, width=12).grid(row=0, column=1, padx=5)
+        ttk.Label(grid_p, text="Pages max :").grid(row=0, column=2, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_max_pages, width=6).grid(row=0, column=3, padx=5)
+        ttk.Label(grid_p, text="Cycles :").grid(row=0, column=4, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_loops, width=6).grid(row=0, column=5, padx=5)
+
+        ttk.Label(grid_p, text="Délai clic (s) :").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(grid_p, textvariable=self.var_walls_delay_click, width=6).grid(row=1, column=1, padx=5)
+        ttk.Label(grid_p, text="Délai menu (s) :").grid(row=1, column=2, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_delay_menu, width=6).grid(row=1, column=3, padx=5)
+        ttk.Label(grid_p, text="Délai valid (s) :").grid(row=1, column=4, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_delay_valid, width=6).grid(row=1, column=5, padx=5)
+
+        # --- Configuration coordonnées ---
+        lf_cfg = ttk.LabelFrame(frame, text="Configuration des coordonnées")
+        lf_cfg.pack(fill="x", padx=10, pady=5)
+
+        f_btns = ttk.Frame(lf_cfg)
+        f_btns.pack(fill="x", padx=5, pady=5)
+        ttk.Button(f_btns, text="⚙ Définir les différents paramètres",
+                   command=self.configure_walls_wizard).pack(side="left", padx=5)
+        ttk.Button(f_btns, text="📋 Afficher la config actuelle",
+                   command=self.show_walls_config).pack(side="left", padx=5)
+        ttk.Button(f_btns, text="💾 Sauvegarder paramètres",
+                   command=self.save_walls_params).pack(side="left", padx=5)
+
+        self.lbl_walls_cfg_status = ttk.Label(lf_cfg, text="", foreground="gray")
+        self.lbl_walls_cfg_status.pack(anchor="w", padx=5)
+        self._refresh_walls_cfg_status()
+
+        # --- Actions ---
+        lf_act = ttk.LabelFrame(frame, text="Actions")
+        lf_act.pack(fill="x", padx=10, pady=10)
+
+        f_act = ttk.Frame(lf_act)
+        f_act.pack(fill="x", padx=5, pady=5)
+        ttk.Button(f_act, text="🔍 Tester OCR (ouvriers / or / elexir)",
+                   command=self.test_walls_ocr).pack(side="left", padx=5)
+        ttk.Button(f_act, text="🧱 LANCER Amélioration Remparts",
+                   command=self.run_walls_upgrade).pack(side="left", padx=5)
+        ttk.Button(f_act, text="🛑 STOP",
+                   command=self.stop_walls_upgrade).pack(side="left", padx=5)
+
+        # --- Log dédié ---
+        lf_log = ttk.LabelFrame(frame, text="Journal")
+        lf_log.pack(fill="both", expand=True, padx=10, pady=10)
+        self.txt_walls_log = tk.Text(lf_log, height=15, state="disabled")
+        self.txt_walls_log.pack(fill="both", expand=True, padx=5, pady=5)
+
+    def _walls_log(self, msg):
+        def append():
+            self.txt_walls_log.config(state="normal")
+            self.txt_walls_log.insert("end", str(msg) + "\n")
+            self.txt_walls_log.see("end")
+            self.txt_walls_log.config(state="disabled")
+        # Thread-safe via Tk
+        self.after(0, append)
+        print(msg)
+
+    def _refresh_walls_cfg_status(self):
+        path = PlayActions.WALLS_CONFIG_FILE
+        if os.path.exists(path):
+            self.lbl_walls_cfg_status.config(
+                text=f"Config trouvée : {path}", foreground="green")
+        else:
+            self.lbl_walls_cfg_status.config(
+                text=f"Aucune config — cliquez sur 'Définir les paramètres' pour la créer.",
+                foreground="orange")
+
+    def show_walls_config(self):
+        cfg = PlayActions.load_walls_config()
+        win = tk.Toplevel(self)
+        win.title("walls_config.json")
+        win.geometry("500x500")
+        txt = tk.Text(win)
+        txt.pack(fill="both", expand=True)
+        txt.insert("1.0", json.dumps(cfg, indent=4, ensure_ascii=False))
+
+    def save_walls_params(self):
+        cfg = PlayActions.load_walls_config()
+        cfg.setdefault("params", {})
+        cfg["params"]["keyword"]         = self.var_walls_keyword.get().strip() or "rempart"
+        cfg["params"]["max_pages"]       = int(self.var_walls_max_pages.get())
+        cfg["params"]["delay_click"]     = float(self.var_walls_delay_click.get())
+        cfg["params"]["delay_open_menu"] = float(self.var_walls_delay_menu.get())
+        cfg["params"]["delay_validate"]  = float(self.var_walls_delay_valid.get())
+        PlayActions.save_walls_config(cfg)
+        self._walls_log("Paramètres sauvegardés.")
+        self._refresh_walls_cfg_status()
+
+    def configure_walls_wizard(self):
+        """Assistant de capture des coordonnées + zones pour l'auto-remparts."""
+        cfg = PlayActions.load_walls_config()
+        steps = PlayActions.WALLS_CONFIG_STEPS
+
+        win = tk.Toplevel(self)
+        win.title("Configuration — Auto Remparts")
+        win.geometry("560x340")
+        win.attributes("-topmost", True)
+
+        ttk.Label(win, text="Placez la souris sur la cible décrite ci-dessous,\n"
+                            "puis appuyez sur [ENTRÉE] pour capturer.\n"
+                            "Appuyez sur [ÉCHAP] pour annuler.",
+                  justify="center").pack(pady=8)
+
+        lbl_step_title = ttk.Label(win, text="", font=("Arial", 13, "bold"), foreground="blue")
+        lbl_step_title.pack(pady=2)
+        lbl_step_desc = ttk.Label(win, text="", wraplength=520, justify="center")
+        lbl_step_desc.pack(pady=2)
+        lbl_substep = ttk.Label(win, text="", font=("Arial", 11, "italic"))
+        lbl_substep.pack(pady=2)
+        lbl_pos = ttk.Label(win, text="Souris : x=0, y=0", font=("Arial", 12))
+        lbl_pos.pack(pady=4)
+        lbl_progress = ttk.Label(win, text="")
+        lbl_progress.pack(pady=2)
+
+        state = {
+            "step_idx": 0,
+            "sub_idx": 0,            # 0 = coin haut-gauche, 1 = coin bas-droit (pour les zones)
+            "current_zone_tl": None, # mémorise le 1er coin d'une zone
+        }
+
+        mouse_ctrl = mouse.Controller()
+
+        def render_step():
+            if state["step_idx"] >= len(steps):
+                return
+            key, typ, title, desc = steps[state["step_idx"]]
+            lbl_step_title.config(text=title)
+            lbl_step_desc.config(text=desc)
+            if typ == "zone":
+                lbl_substep.config(text=("➤ Coin HAUT-GAUCHE" if state["sub_idx"] == 0
+                                          else "➤ Coin BAS-DROIT"))
+            else:
+                lbl_substep.config(text="➤ Position du bouton")
+            lbl_progress.config(text=f"Étape {state['step_idx'] + 1} / {len(steps)}")
+
+        def update_mouse():
+            if not win.winfo_exists():
+                return
+            x, y = mouse_ctrl.position
+            lbl_pos.config(text=f"Souris : x={int(x)}, y={int(y)}")
+            win.after(40, update_mouse)
+
+        def set_nested(d, dotted_key, value):
+            section, name = dotted_key.split(".", 1)
+            d.setdefault(section, {})[name] = value
+
+        def finalize():
+            PlayActions.save_walls_config(cfg)
+            self._walls_log("Configuration des coordonnées sauvegardée.")
+            self._refresh_walls_cfg_status()
+
+        def capture_current():
+            x, y = mouse_ctrl.position
+            x, y = int(x), int(y)
+            key, typ, title, _ = steps[state["step_idx"]]
+            if typ == "point":
+                set_nested(cfg, key, {"x": x, "y": y})
+                self._walls_log(f"[{title}] capturé → ({x}, {y})")
+                state["step_idx"] += 1
+                state["sub_idx"] = 0
+            else:  # zone
+                if state["sub_idx"] == 0:
+                    state["current_zone_tl"] = (x, y)
+                    self._walls_log(f"[{title}] coin haut-gauche → ({x}, {y})")
+                    state["sub_idx"] = 1
+                else:
+                    x1, y1 = state["current_zone_tl"]
+                    x2, y2 = x, y
+                    # Normaliser au cas où l'utilisateur inverse les coins
+                    set_nested(cfg, key, {
+                        "x1": min(x1, x2), "y1": min(y1, y2),
+                        "x2": max(x1, x2), "y2": max(y1, y2),
+                    })
+                    self._walls_log(f"[{title}] coin bas-droit → ({x2}, {y2})")
+                    state["current_zone_tl"] = None
+                    state["step_idx"] += 1
+                    state["sub_idx"] = 0
+            if state["step_idx"] >= len(steps):
+                finalize()
+                messagebox.showinfo("Terminé",
+                    "Tous les paramètres ont été configurés et sauvegardés.")
+                close_window()
+            else:
+                render_step()
+
+        def on_press(key):
+            try:
+                if key == keyboard.Key.enter:
+                    # Capture doit se faire dans le thread Tk
+                    self.after(0, capture_current)
+                elif key == keyboard.Key.esc:
+                    self.after(0, close_window)
+            except AttributeError:
+                pass
+
+        listener = keyboard.Listener(on_press=on_press)
+        listener.start()
+
+        def close_window():
+            try:
+                listener.stop()
+            except Exception:
+                pass
+            if win.winfo_exists():
+                win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", close_window)
+        render_step()
+        update_mouse()
+
+    def test_walls_ocr(self):
+        def task():
+            try:
+                self.save_walls_params()
+                upg = PlayActions.WallsUpgrader(log_callback=self._walls_log)
+                self._walls_log("--- Test OCR ---")
+                upg.read_state()
+                self._walls_log("--- Fin test OCR ---")
+            except Exception as e:
+                self._walls_log(f"Erreur test OCR : {e}")
+        threading.Thread(target=task, daemon=True).start()
+
+    def run_walls_upgrade(self):
+        if self.walls_thread and self.walls_thread.is_alive():
+            messagebox.showwarning("En cours", "Une session d'amélioration tourne déjà.")
+            return
+        self.save_walls_params()
+        self.walls_stop_event.clear()
+        loops = max(1, int(self.var_walls_loops.get()))
+
+        def task():
+            try:
+                upg = PlayActions.WallsUpgrader(
+                    log_callback=self._walls_log,
+                    stop_event=self.walls_stop_event,
+                )
+                self._walls_log(f"=== Lancement Auto-Remparts ({loops} cycle(s)) ===")
+                upg.run(loops=loops)
+            except Exception as e:
+                self._walls_log(f"Erreur Auto-Remparts : {e}")
+
+        self.walls_thread = threading.Thread(target=task, daemon=True)
+        self.walls_thread.start()
+
+    def stop_walls_upgrade(self):
+        if self.walls_thread and self.walls_thread.is_alive():
+            self.walls_stop_event.set()
+            self._walls_log("Demande d'arrêt envoyée…")
+        else:
+            self._walls_log("Aucune session en cours.")
 
     def create_data_tab(self):
         frame = ttk.Frame(self.notebook)

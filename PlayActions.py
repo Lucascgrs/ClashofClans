@@ -364,3 +364,378 @@ def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9,
             
             
 #LecteurPosition(fichier_entree="C:\\Users\\LucasCONGRAS\\PycharmProjects\\PythonProject\\PROJECT\\test.json").rejouer()
+
+
+# =========================================================================
+# WALLS UPGRADER : Lit ressources/ouvriers, ouvre info ouvriers, cherche
+# "Rempart" dans la liste des améliorations possibles, calcule combien on
+# peut en améliorer avec or puis elexir, et lance les améliorations.
+# Toutes les coordonnées sont stockées dans walls_config.json et sont
+# définies via l'assistant de configuration du GUI.
+# =========================================================================
+
+WALLS_CONFIG_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "walls_config.json"
+)
+
+WALLS_DEFAULT_CONFIG = {
+    "zones": {
+        "ouvriers":              {"x1": 940,  "y1": 39,  "x2": 1030, "y2": 80},
+        "or":                    {"x1": 1515, "y1": 40,  "x2": 1815, "y2": 81},
+        "elexir":                {"x1": 1515, "y1": 143, "x2": 1815, "y2": 184},
+        "liste_ameliorations":   {"x1": 700,  "y1": 180, "x2": 1263, "y2": 800},
+    },
+    "buttons": {
+        "info_ouvriers":  {"x": 100,  "y": 200},
+        "ameliorer_plus": {"x": 1200, "y": 500},
+        "valider_or":     {"x": 700,  "y": 600},
+        "valider_elexir": {"x": 800,  "y": 600},
+        "suivant_page":   {"x": 1300, "y": 400},
+        "clic_neutre":    {"x": 5,    "y": 5},
+    },
+    "params": {
+        "keyword":         "rempart",
+        "max_pages":       6,
+        "delay_click":     0.6,
+        "delay_open_menu": 1.5,
+        "delay_validate":  1.2,
+    },
+}
+
+# Ordre + libellés des items à capturer dans l'assistant de configuration.
+# type = "point"  -> 1 capture (x, y)
+# type = "zone"   -> 2 captures (coin haut-gauche, coin bas-droit)
+WALLS_CONFIG_STEPS = [
+    ("zones.ouvriers",            "zone",
+     "Zone NB OUVRIERS",
+     "Délimitez le rectangle autour du nombre d'ouvriers (ex: '2/5') en haut de l'écran."),
+    ("zones.or",                  "zone",
+     "Zone OR",
+     "Délimitez le rectangle autour du nombre d'OR (ressource jaune)."),
+    ("zones.elexir",              "zone",
+     "Zone ELEXIR",
+     "Délimitez le rectangle autour du nombre d'ELEXIR (ressource violette)."),
+    ("zones.liste_ameliorations", "zone",
+     "Zone LISTE AMÉLIORATIONS",
+     "Ouvrez la liste des améliorations (info ouvriers) puis délimitez les 2 coins (haut-gauche et bas-droit) du grand rectangle qui contient la liste."),
+    ("buttons.info_ouvriers",     "point",
+     "Bouton 'i' Info Ouvriers",
+     "Placez la souris sur le petit 'i' à côté de l'icône des ouvriers et appuyez sur ENTRÉE."),
+    ("buttons.ameliorer_plus",    "point",
+     "Bouton AMÉLIORER PLUS (+)",
+     "Placez la souris sur le bouton 'Améliorer plus' (le bouton qui ajoute un rempart à l'amélioration en cours)."),
+    ("buttons.valider_or",        "point",
+     "Bouton VALIDER (OR)",
+     "Placez la souris sur le bouton qui valide l'amélioration payée en OR."),
+    ("buttons.valider_elexir",    "point",
+     "Bouton VALIDER (ELEXIR)",
+     "Placez la souris sur le bouton qui valide l'amélioration payée en ELEXIR."),
+    ("buttons.suivant_page",      "point",
+     "Bouton PAGE SUIVANTE",
+     "Placez la souris sur le bouton 'Suivant' dans la fenêtre d'info ouvriers (pour faire défiler la liste)."),
+    ("buttons.clic_neutre",       "point",
+     "CLIC NEUTRE (fermeture)",
+     "Placez la souris sur un endroit neutre (typiquement en haut à gauche) qui ferme les pop-ups et revient au village."),
+]
+
+
+def load_walls_config():
+    if not os.path.exists(WALLS_CONFIG_FILE):
+        return json.loads(json.dumps(WALLS_DEFAULT_CONFIG))  # copie
+    try:
+        with open(WALLS_CONFIG_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # merge avec les défauts pour ajouter les clés manquantes
+        cfg = json.loads(json.dumps(WALLS_DEFAULT_CONFIG))
+        for section in ("zones", "buttons", "params"):
+            cfg.setdefault(section, {}).update(data.get(section, {}))
+        return cfg
+    except Exception as e:
+        print(f"[WallsConfig] Erreur lecture : {e}")
+        return json.loads(json.dumps(WALLS_DEFAULT_CONFIG))
+
+
+def save_walls_config(cfg):
+    with open(WALLS_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=4, ensure_ascii=False)
+
+
+class WallsUpgrader:
+    """Lit ressources/ouvriers via OCR et automatise l'amélioration des remparts."""
+
+    def __init__(self, log_callback=None, stop_event=None):
+        self.cfg = load_walls_config()
+        self.log = log_callback or print
+        self.stop_event = stop_event
+        self._reader = None
+        self._cam = None
+
+    # ---------- utilitaires ----------
+
+    def _check_stop(self):
+        return self.stop_event is not None and self.stop_event.is_set()
+
+    def _sleep(self, delay):
+        # micro-pauses pour pouvoir s'arrêter rapidement
+        end = time.time() + delay
+        while time.time() < end:
+            if self._check_stop():
+                return
+            time.sleep(min(0.1, end - time.time()))
+
+    def _reader_init(self):
+        if self._reader is None:
+            import easyocr
+            self._reader = easyocr.Reader(['fr', 'en'])
+        if self._cam is None:
+            self._cam = dxcam.create()
+        return self._reader, self._cam
+
+    def _grab(self, zone):
+        """zone = {"x1","y1","x2","y2"}. Renvoie l'image binarisée + bbox absolue."""
+        reader, cam = self._reader_init()
+        x1, y1, x2, y2 = zone['x1'], zone['y1'], zone['x2'], zone['y2']
+        if x2 <= x1 or y2 <= y1:
+            return None, (x1, y1)
+        img = cam.grab(region=(x1, y1, x2, y2))
+        if img is None:
+            time.sleep(0.05)
+            img = cam.grab(region=(x1, y1, x2, y2))
+        if img is None:
+            return None, (x1, y1)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY)
+        return thresh, (x1, y1)
+
+    def _ocr_text(self, zone):
+        reader, _ = self._reader_init()
+        img, _ = self._grab(zone)
+        if img is None:
+            return ""
+        results = reader.readtext(img)
+        return ' '.join(r[1] for r in results)
+
+    def _ocr_lines(self, zone, line_threshold=22):
+        """OCR + regroupement par lignes. Retourne [{'text','left','right','top','bot','cy'}, ...]
+        Coordonnées en absolu (écran)."""
+        reader, _ = self._reader_init()
+        img, (ox, oy) = self._grab(zone)
+        if img is None:
+            return []
+        results = reader.readtext(img)
+        detections = []
+        for bbox, text, conf in results:
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            detections.append({
+                'text': text,
+                'left':  min(xs) + ox, 'right': max(xs) + ox,
+                'top':   min(ys) + oy, 'bot':   max(ys) + oy,
+                'cx':    (min(xs) + max(xs)) / 2 + ox,
+                'cy':    (min(ys) + max(ys)) / 2 + oy,
+            })
+        detections.sort(key=lambda d: d['cy'])
+        lines = []
+        cur = []
+        last_cy = None
+        for d in detections:
+            if last_cy is None or abs(d['cy'] - last_cy) <= line_threshold:
+                cur.append(d)
+            else:
+                lines.append(cur)
+                cur = [d]
+            last_cy = d['cy']
+        if cur:
+            lines.append(cur)
+
+        merged = []
+        for line in lines:
+            line.sort(key=lambda d: d['left'])
+            merged.append({
+                'text':  ' '.join(d['text'] for d in line),
+                'left':  min(d['left']  for d in line),
+                'right': max(d['right'] for d in line),
+                'top':   min(d['top']   for d in line),
+                'bot':   max(d['bot']   for d in line),
+                'cy':    sum(d['cy']    for d in line) / len(line),
+                'parts': line,
+            })
+        return merged
+
+    # ---------- lectures haut niveau ----------
+
+    def read_workers(self):
+        raw = self._ocr_text(self.cfg['zones']['ouvriers'])
+        s = raw.strip().replace('o', '0').replace('O', '0').replace('S', '5')
+        m = re.search(r'(\d+)\s*/\s*(\d+)', s)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        m = re.search(r'(\d+)', s)
+        if m:
+            return int(m.group(1)), 0
+        return 0, 0
+
+    def read_gold(self):
+        raw = self._ocr_text(self.cfg['zones']['or']).replace('o', '0').replace('O', '0')
+        digits = re.sub(r'\D', '', raw)
+        return int(digits) if digits else 0
+
+    def read_elexir(self):
+        raw = self._ocr_text(self.cfg['zones']['elexir']).replace('o', '0').replace('O', '0')
+        digits = re.sub(r'\D', '', raw)
+        return int(digits) if digits else 0
+
+    def read_state(self):
+        free, total = self.read_workers()
+        gold = self.read_gold()
+        elexir = self.read_elexir()
+        self.log(f"Ouvriers : {free}/{total}  |  Or : {gold}  |  Elexir : {elexir}")
+        return {"workers_free": free, "workers_total": total,
+                "gold": gold, "elexir": elexir}
+
+    # ---------- clics ----------
+
+    def _click_xy(self, x, y, delay=None):
+        if self._check_stop():
+            return
+        pyautogui.click(int(x), int(y))
+        self._sleep(delay if delay is not None else self.cfg['params']['delay_click'])
+
+    def _click_button(self, key, delay=None):
+        b = self.cfg['buttons'].get(key)
+        if not b:
+            raise KeyError(f"Bouton non configuré : {key}")
+        self._click_xy(b['x'], b['y'], delay=delay)
+
+    # ---------- recherche d'un mot-clé dans la liste ----------
+
+    def _find_keyword_in_list(self, keyword):
+        """Cherche `keyword` dans la zone liste_ameliorations.
+        Retourne (texte_ligne, prix, click_x, click_y) ou None."""
+        keyword = keyword.lower()
+        lines = self._ocr_lines(self.cfg['zones']['liste_ameliorations'])
+        for line in lines:
+            txt_norm = line['text'].lower().replace('o', '0').replace('O', '0')
+            if keyword in txt_norm:
+                # Extraire le dernier nombre rencontré (le prix)
+                tokens = re.sub(r'[^a-zA-Z0-9 ]', ' ', line['text']).split()
+                prix = 0
+                for tok in reversed(tokens):
+                    if tok.isdigit():
+                        prix = int(tok)
+                        break
+                # Clic au début de la ligne (sur le nom de l'amélioration)
+                cx = line['left'] + 20
+                cy = (line['top'] + line['bot']) / 2
+                return (line['text'], prix, int(cx), int(cy))
+        return None
+
+    def _open_workers_menu(self):
+        self._click_button('clic_neutre')
+        self._sleep(self.cfg['params']['delay_click'])
+        self._click_button('info_ouvriers')
+        self._sleep(self.cfg['params']['delay_open_menu'])
+
+    def _scan_for_rempart(self):
+        """Ouvre le menu, fait défiler les pages, renvoie (nom, prix, x, y) ou None."""
+        keyword = self.cfg['params'].get('keyword', 'rempart')
+        max_pages = int(self.cfg['params'].get('max_pages', 6))
+        self._open_workers_menu()
+        for page in range(max_pages):
+            if self._check_stop():
+                return None
+            found = self._find_keyword_in_list(keyword)
+            if found:
+                self.log(f"[Page {page+1}] Trouvé : '{found[0]}' (prix {found[1]})")
+                return found
+            self.log(f"[Page {page+1}] Pas de '{keyword}' visible, page suivante.")
+            self._click_button('suivant_page')
+            self._sleep(self.cfg['params']['delay_open_menu'])
+        return None
+
+    def _do_upgrade(self, click_x, click_y, nb, valider_key):
+        """Clique sur la ligne rempart, +nb fois sur 'améliorer plus', puis valide."""
+        self.log(f"→ Sélection rempart + {nb} clics 'améliorer plus' + valider ({valider_key})")
+        self._click_xy(click_x, click_y, delay=self.cfg['params']['delay_open_menu'])
+        for i in range(nb):
+            if self._check_stop():
+                return
+            self._click_button('ameliorer_plus')
+        self._sleep(self.cfg['params']['delay_click'])
+        self._click_button(valider_key, delay=self.cfg['params']['delay_validate'])
+        self._click_button('clic_neutre')
+        self._sleep(self.cfg['params']['delay_click'])
+
+    # ---------- orchestration ----------
+
+    def run_once(self):
+        """Une passe complète : lit l'état, améliore avec or, puis avec elexir."""
+        if self._check_stop():
+            return False
+
+        state = self.read_state()
+        if state['workers_free'] <= 0:
+            self.log("Aucun ouvrier libre — rien à faire.")
+            return False
+
+        # --- Phase 1 : OR ---
+        found = self._scan_for_rempart()
+        if not found:
+            self.log("Aucun rempart trouvé dans les améliorations possibles.")
+            return False
+        nom, prix, x, y = found
+        if prix <= 0:
+            self.log(f"Prix illisible pour '{nom}' — annulation.")
+            return False
+
+        did_anything = False
+        nb_or = state['gold'] // prix if prix > 0 else 0
+        if nb_or > 0:
+            self.log(f"Avec {state['gold']} OR à {prix}/rempart → {nb_or} rempart(s).")
+            self._do_upgrade(x, y, nb_or, 'valider_or')
+            did_anything = True
+        else:
+            self.log(f"Pas assez d'OR ({state['gold']} < {prix}) pour un rempart.")
+
+        if self._check_stop():
+            return did_anything
+
+        # --- Phase 2 : ELEXIR (relire l'état car des ouvriers ont été consommés) ---
+        state2 = self.read_state()
+        if state2['workers_free'] <= 0:
+            self.log("Plus d'ouvrier libre après la phase OR.")
+            return did_anything
+
+        found2 = self._scan_for_rempart()
+        if not found2:
+            self.log("Rempart introuvable pour la phase ELEXIR.")
+            return did_anything
+        nom2, prix2, x2, y2 = found2
+        if prix2 <= 0:
+            self.log(f"Prix illisible (elexir) pour '{nom2}' — annulation.")
+            return did_anything
+
+        nb_el = state2['elexir'] // prix2 if prix2 > 0 else 0
+        # Borner par le nombre d'ouvriers restants
+        nb_el = min(nb_el, state2['workers_free'])
+        if nb_el > 0:
+            self.log(f"Avec {state2['elexir']} ELEXIR à {prix2}/rempart → {nb_el} rempart(s).")
+            self._do_upgrade(x2, y2, nb_el, 'valider_elexir')
+            did_anything = True
+        else:
+            self.log(f"Pas assez d'ELEXIR ({state2['elexir']} < {prix2}) ou plus d'ouvriers.")
+
+        return did_anything
+
+    def run(self, loops=1):
+        for i in range(max(1, int(loops))):
+            if self._check_stop():
+                self.log("Arrêt demandé.")
+                return
+            self.log(f"=== Cycle {i+1}/{loops} ===")
+            try:
+                self.run_once()
+            except Exception as e:
+                self.log(f"Erreur durant le cycle : {e}")
+                return
+        self.log("=== Terminé ===")
