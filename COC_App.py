@@ -7,10 +7,30 @@ import logging
 import pandas as pd
 from pynput import mouse, keyboard
 
-# Importation de vos modules existants
 import COC
-import PlayActions
 import RegisterActions
+import playback
+import walls
+import attack_session
+
+
+DEFAULT_ACCOUNT = {
+    "name":              "",
+    "switch_file":       "",
+    "first_army_file":   "",
+    "second_army_file":  "",
+    "switch_army":       False,
+}
+
+
+def migrate_account(acc: dict) -> dict:
+    """Convertit l'ancien schéma {name, file} vers le nouveau."""
+    out = {**DEFAULT_ACCOUNT, **acc}
+    if "file" in out and not out.get("switch_file"):
+        out["switch_file"] = out.pop("file")
+    elif "file" in out:
+        out.pop("file")
+    return out
 
 class CLASH_GUI(tk.Tk):
     def __init__(self):
@@ -243,41 +263,31 @@ class CLASH_GUI(tk.Tk):
         lf_atk = ttk.LabelFrame(col2, text="Attaques Automatiques & Gestion Comptes")
         lf_atk.pack(fill="x", pady=10)
 
-        # Gestion des comptes (Dynamique)
-        self.accounts_file = "accounts_config.json"
-        
-        # Initialisation self.accounts si pas encore fait
-        if not hasattr(self, 'accounts'):
-             self.accounts = self.load_accounts()
-        
+        self.accounts_file = os.path.join(os.path.dirname(__file__),
+                                          "accounts_config.json")
+        if not hasattr(self, "accounts"):
+            self.accounts = self.load_accounts()
+
         f_acc_man = ttk.Frame(lf_atk)
         f_acc_man.pack(fill="x", padx=5, pady=5)
-        
+
         ttk.Label(f_acc_man, text="Comptes configurés :").pack(anchor="w")
-        
-        # Liste avec checkbox simulée (multi-sélection dans Listbox)
-        self.lb_accounts = tk.Listbox(f_acc_man, selectmode="extended", height=5, exportselection=False)
+
+        self.lb_accounts = tk.Listbox(f_acc_man, selectmode="extended",
+                                      height=5, exportselection=False)
         self.lb_accounts.pack(fill="x", pady=2)
-        
-        for acc in self.accounts:
-            self.lb_accounts.insert('end', f"{acc['name']} ({acc['file']})")
-        # Sélection par défaut (tout)
+        self._refresh_accounts_listbox()
         self.lb_accounts.select_set(0, tk.END)
-            
-        # Ajout nouveau compte
-        f_add = ttk.Frame(f_acc_man)
-        f_add.pack(fill="x", pady=2)
-        
-        ttk.Label(f_add, text="Nom:").pack(side="left")
-        self.entry_acc_name = ttk.Entry(f_add, width=8)
-        self.entry_acc_name.pack(side="left", padx=2)
-        
-        ttk.Label(f_add, text="Fichier:").pack(side="left")
-        self.cb_acc_file = ttk.Combobox(f_add, state="readonly", width=12)
-        self.cb_acc_file.pack(side="left", padx=2)
-        
-        ttk.Button(f_add, text="+", width=3, command=self.add_account).pack(side="left", padx=2)
-        ttk.Button(f_add, text="-", width=3, command=self.remove_account).pack(side="left", padx=2)
+        self.lb_accounts.bind("<Double-Button-1>", lambda e: self.edit_account())
+
+        f_acc_btn = ttk.Frame(f_acc_man)
+        f_acc_btn.pack(fill="x", pady=2)
+        ttk.Button(f_acc_btn, text="➕ Ajouter",
+                   command=self.add_account).pack(side="left", padx=2)
+        ttk.Button(f_acc_btn, text="✏ Éditer",
+                   command=self.edit_account).pack(side="left", padx=2)
+        ttk.Button(f_acc_btn, text="🗑 Supprimer",
+                   command=self.remove_account).pack(side="left", padx=2)
             
         ttk.Separator(lf_atk, orient="horizontal").pack(fill="x", pady=5)
         
@@ -328,7 +338,7 @@ class CLASH_GUI(tk.Tk):
         lf_params = ttk.LabelFrame(frame, text="Paramètres")
         lf_params.pack(fill="x", padx=10, pady=10)
 
-        cfg = PlayActions.load_walls_config()
+        cfg = walls.load_walls_config()
         p = cfg.get("params", {})
 
         self.var_walls_keyword       = tk.StringVar(value=p.get("keyword", "rempart"))
@@ -409,7 +419,7 @@ class CLASH_GUI(tk.Tk):
         print(msg)
 
     def _refresh_walls_cfg_status(self):
-        path = PlayActions.WALLS_CONFIG_FILE
+        path = walls.WALLS_CONFIG_FILE
         if os.path.exists(path):
             self.lbl_walls_cfg_status.config(
                 text=f"Config trouvée : {path}", foreground="green")
@@ -419,7 +429,7 @@ class CLASH_GUI(tk.Tk):
                 foreground="orange")
 
     def show_walls_config(self):
-        cfg = PlayActions.load_walls_config()
+        cfg = walls.load_walls_config()
         win = tk.Toplevel(self)
         win.title("walls_config.json")
         win.geometry("500x500")
@@ -428,7 +438,7 @@ class CLASH_GUI(tk.Tk):
         txt.insert("1.0", json.dumps(cfg, indent=4, ensure_ascii=False))
 
     def save_walls_params(self):
-        cfg = PlayActions.load_walls_config()
+        cfg = walls.load_walls_config()
         cfg.setdefault("params", {})
         cfg["params"]["keyword"]         = self.var_walls_keyword.get().strip() or "rempart"
         cfg["params"]["max_scrolls"]     = int(self.var_walls_max_scrolls.get())
@@ -437,14 +447,14 @@ class CLASH_GUI(tk.Tk):
         cfg["params"]["delay_open_menu"] = float(self.var_walls_delay_menu.get())
         cfg["params"]["delay_validate"]  = float(self.var_walls_delay_valid.get())
         cfg["params"]["delay_scroll"]    = float(self.var_walls_delay_scroll.get())
-        PlayActions.save_walls_config(cfg)
+        walls.save_walls_config(cfg)
         self._walls_log("Paramètres sauvegardés.")
         self._refresh_walls_cfg_status()
 
     def configure_walls_wizard(self):
         """Assistant de capture des coordonnées + zones pour l'auto-remparts."""
-        cfg = PlayActions.load_walls_config()
-        steps = PlayActions.WALLS_CONFIG_STEPS
+        cfg = walls.load_walls_config()
+        steps = walls.WALLS_CONFIG_STEPS
 
         win = tk.Toplevel(self)
         win.title("Configuration — Auto Remparts")
@@ -500,7 +510,7 @@ class CLASH_GUI(tk.Tk):
             d.setdefault(section, {})[name] = value
 
         def finalize():
-            PlayActions.save_walls_config(cfg)
+            walls.save_walls_config(cfg)
             self._walls_log("Configuration des coordonnées sauvegardée.")
             self._refresh_walls_cfg_status()
 
@@ -567,7 +577,7 @@ class CLASH_GUI(tk.Tk):
         def task():
             try:
                 self.save_walls_params()
-                upg = PlayActions.WallsUpgrader(log_callback=self._walls_log)
+                upg = walls.WallsUpgrader(log_callback=self._walls_log)
                 self._walls_log("--- Test OCR ---")
                 upg.read_state()
                 self._walls_log("--- Fin test OCR ---")
@@ -584,7 +594,7 @@ class CLASH_GUI(tk.Tk):
 
         def task():
             try:
-                upg = PlayActions.WallsUpgrader(
+                upg = walls.WallsUpgrader(
                     log_callback=self._walls_log,
                     stop_event=self.walls_stop_event,
                 )
@@ -652,53 +662,139 @@ class CLASH_GUI(tk.Tk):
                 self.lst_actions.insert('end', f)
                 self.action_files.append(f)
         
-        # Update comboboxes
         self.cb_strat_main['values'] = self.action_files
         self.cb_strat_night['values'] = self.action_files
-        if hasattr(self, 'cb_acc_file'):
-            self.cb_acc_file['values'] = self.action_files
+
+    # ---------- Gestion des comptes ----------
 
     def load_accounts(self):
-        if os.path.exists(self.accounts_file):
-            try:
-                with open(self.accounts_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except:
-                pass
-        return [{"name": "Exemple", "file": "switch_exemple.json"}]
+        if not os.path.exists(self.accounts_file):
+            return []
+        try:
+            with open(self.accounts_file, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            return [migrate_account(a) for a in raw]
+        except Exception as e:
+            print(f"Erreur lecture comptes : {e}")
+            return []
 
     def save_accounts(self):
         try:
-            with open(self.accounts_file, 'w', encoding='utf-8') as f:
-                json.dump(self.accounts, f, indent=4)
+            with open(self.accounts_file, "w", encoding="utf-8") as f:
+                json.dump(self.accounts, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            self.log(f"Erreur sauvegarde comptes: {e}")
-            
+            self.log(f"Erreur sauvegarde comptes : {e}")
+
+    def _format_account_label(self, acc):
+        bits = [acc.get("name") or "(sans nom)"]
+        if acc.get("switch_file"):
+            bits.append(f"({acc['switch_file']})")
+        if acc.get("switch_army"):
+            bits.append("⇄ armée")
+        return "  ".join(bits)
+
+    def _refresh_accounts_listbox(self):
+        self.lb_accounts.delete(0, "end")
+        for acc in self.accounts:
+            self.lb_accounts.insert("end", self._format_account_label(acc))
+
     def add_account(self):
-        name = self.entry_acc_name.get().strip()
-        f = self.cb_acc_file.get()
-        if not name or not f:
-            messagebox.showwarning("Erreur", "Veuillez remplir le nom et choisir un fichier.")
+        self._open_account_editor(None)
+
+    def edit_account(self):
+        sel = self.lb_accounts.curselection()
+        if not sel:
+            messagebox.showinfo("Information", "Sélectionnez un compte à éditer.")
             return
-            
-        self.accounts.append({"name": name, "file": f})
-        self.save_accounts()
-        self.lb_accounts.insert('end', f"{name} ({f})")
-        
-        # Clear fields
-        self.entry_acc_name.delete(0, 'end')
-        self.cb_acc_file.set('')
-        
+        self._open_account_editor(sel[0])
+
     def remove_account(self):
         sel = self.lb_accounts.curselection()
         if not sel:
             return
-        
-        # Supprimer du dernier au premier pour éviter décalage d'index
+        if not messagebox.askyesno("Confirmation",
+                                   f"Supprimer {len(sel)} compte(s) ?"):
+            return
         for index in reversed(sel):
-            self.lb_accounts.delete(index)
             del self.accounts[index]
         self.save_accounts()
+        self._refresh_accounts_listbox()
+
+    def _open_account_editor(self, index):
+        """index = None → ajout ; sinon édition du compte à l'index donné."""
+        is_new = index is None
+        acc = dict(DEFAULT_ACCOUNT) if is_new else dict(self.accounts[index])
+
+        action_files = [""] + list(getattr(self, "action_files", []))
+
+        win = tk.Toplevel(self)
+        win.title("Nouveau compte" if is_new else f"Édition — {acc.get('name', '')}")
+        win.geometry("420x300")
+        win.transient(self)
+        win.grab_set()
+
+        v_name   = tk.StringVar(value=acc.get("name", ""))
+        v_switch = tk.StringVar(value=acc.get("switch_file", ""))
+        v_army1  = tk.StringVar(value=acc.get("first_army_file", ""))
+        v_army2  = tk.StringVar(value=acc.get("second_army_file", ""))
+        v_swarmy = tk.BooleanVar(value=bool(acc.get("switch_army", False)))
+
+        grid = ttk.Frame(win)
+        grid.pack(fill="both", expand=True, padx=10, pady=10)
+
+        def row(r, label, var, combo=False):
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w", pady=4)
+            if combo:
+                ttk.Combobox(grid, textvariable=var, values=action_files,
+                             width=32).grid(row=r, column=1, sticky="ew", pady=4)
+            else:
+                ttk.Entry(grid, textvariable=var, width=34).grid(
+                    row=r, column=1, sticky="ew", pady=4)
+
+        row(0, "Nom :",                 v_name,   combo=False)
+        row(1, "Fichier switch :",      v_switch, combo=True)
+        row(2, "Armée principale :",    v_army1,  combo=True)
+        row(3, "Armée secondaire :",    v_army2,  combo=True)
+        ttk.Checkbutton(grid, text="Changer d'armée avant les attaques de nuit",
+                        variable=v_swarmy).grid(row=4, column=0, columnspan=2,
+                                                sticky="w", pady=6)
+        grid.columnconfigure(1, weight=1)
+
+        ttk.Label(grid, foreground="gray",
+                  text="Les fichiers d'armée sont optionnels. Si vides,\n"
+                       "les valeurs par défaut de attack_config.json sont utilisées.",
+                  justify="left").grid(row=5, column=0, columnspan=2,
+                                       sticky="w", pady=4)
+
+        def save_and_close():
+            name = v_name.get().strip()
+            switch_file = v_switch.get().strip()
+            if not name:
+                messagebox.showwarning("Erreur", "Le nom est obligatoire.", parent=win)
+                return
+            if not switch_file:
+                messagebox.showwarning("Erreur",
+                                       "Le fichier switch est obligatoire.", parent=win)
+                return
+            new_acc = {
+                "name":             name,
+                "switch_file":      switch_file,
+                "first_army_file":  v_army1.get().strip(),
+                "second_army_file": v_army2.get().strip(),
+                "switch_army":      bool(v_swarmy.get()),
+            }
+            if is_new:
+                self.accounts.append(new_acc)
+            else:
+                self.accounts[index] = new_acc
+            self.save_accounts()
+            self._refresh_accounts_listbox()
+            win.destroy()
+
+        bar = ttk.Frame(win)
+        bar.pack(fill="x", padx=10, pady=8)
+        ttk.Button(bar, text="Enregistrer", command=save_and_close).pack(side="right")
+        ttk.Button(bar, text="Annuler",     command=win.destroy).pack(side="right", padx=6)
 
     def update_coc_config(self):
         """Met à jour la config globale de COC avec les valeurs du GUI"""
@@ -931,27 +1027,22 @@ class CLASH_GUI(tk.Tk):
         self.log(f"Lecture action : {fname}")
         
         # Exécuter dans un thread pour ne pas figer l'interface
-        threading.Thread(target=lambda: PlayActions.LecteurPosition(fichier_entree=fname).rejouer()).start()
+        threading.Thread(target=lambda: playback.LecteurPosition(fichier_entree=fname).rejouer()).start()
 
     def run_auto_attack(self):
-        # Récupération des comptes sélectionnés dans la Listbox
         selected_indices = self.lb_accounts.curselection()
         if not selected_indices:
             messagebox.showwarning("Attention", "Aucun compte sélectionné !")
             return
 
-        actions_to_run = []
-        for idx in selected_indices:
-            acc = self.accounts[idx]
-            # Format attendu par l'attaque auto : (True, "fichier_switch.json")
-            actions_to_run.append((True, acc["file"]))
-            
-        nb_lose = self.var_nb_lose.get()
-        nb_atk = self.var_nb_atk.get()
-        nb_night = self.var_nb_night.get()
-        strat = self.var_strat_main.get()
+        accounts = [self.accounts[idx] for idx in selected_indices]
+
+        nb_lose     = self.var_nb_lose.get()
+        nb_atk      = self.var_nb_atk.get()
+        nb_night    = self.var_nb_night.get()
+        strat       = self.var_strat_main.get()
         strat_night = self.var_strat_night.get()
-        
+
         if not strat:
             messagebox.showwarning("Attention", "Veuillez choisir une stratégie principale.")
             return
@@ -960,26 +1051,25 @@ class CLASH_GUI(tk.Tk):
                        if self.var_walls_ritual_enabled.get() else 0)
 
         def task():
-            self.log("Démarrage de la session d'attaques...")
+            self.log("Démarrage de la session d'attaques…")
             if walls_every > 0:
                 self.log(f"Rituel remparts activé : toutes les {walls_every} attaques.")
             try:
-                # On passe la liste dynamique au lieu des comptes harcodés
-                PlayActions.attaque_with_all_accounts(
+                attack_session.run_attack_session(
+                    accounts,
                     defaites=nb_lose,
                     attaques=nb_atk,
                     attaques_night=nb_night,
                     strategy_file=strat,
                     night_strategy_file=strat_night,
-                    custom_accounts_list=actions_to_run,
                     walls_every=walls_every,
+                    log_callback=self.log,
                     walls_log_callback=self.log,
                 )
-                self.log("Session d'attaques terminée.")
             except Exception as e:
-                self.log(f"Erreur Attaques: {e}")
+                self.log(f"Erreur Attaques : {e}")
 
-        threading.Thread(target=task).start()
+        threading.Thread(target=task, daemon=True).start()
 
     def load_parquet(self, filename):
         full_path = os.path.join(os.path.dirname(__file__), filename)
