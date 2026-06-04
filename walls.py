@@ -405,10 +405,13 @@ class WallsUpgrader:
         resource ∈ {'or', 'elexir'}."""
         ameliorer_key = f"ameliorer_{resource}"
         valider_key   = f"valider_{resource}"
-        self.log(f"→ Sélection rempart, {nb} clic(s) 'améliorer plus', "
-                 f"améliorer {resource}, valider {resource}")
+        # +1 clic supplémentaire pour compenser un éventuel 1er clic à vide
+        # (focus de la fenêtre, animation d'ouverture, etc.)
+        total_clics = nb + 1
+        self.log(f"→ Sélection rempart, {total_clics} clic(s) 'améliorer plus' "
+                 f"(dont +1 de garde), améliorer {resource}, valider {resource}")
         self._click_xy(click_x, click_y, delay=self.cfg["params"]["delay_open_menu"])
-        for _ in range(nb):
+        for _ in range(total_clics):
             if self._stop_requested():
                 return
             self._click_button("ameliorer_plus")
