@@ -1,6 +1,9 @@
 [
     {
         "name": "petitlulu",
-        "file": "switchptitlulu.json"
+        "switch_file": "switchptitlulu.json",
+        "first_army_file": "selectfirstarmy.json",
+        "second_army_file": "selectsecondarmy.json",
+        "switch_army": false
     }
 ]
