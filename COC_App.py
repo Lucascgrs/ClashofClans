@@ -348,6 +348,10 @@ class CLASH_GUI(tk.Tk):
         self.var_walls_delay_menu    = tk.DoubleVar(value=float(p.get("delay_open_menu", 1.5)))
         self.var_walls_delay_valid   = tk.DoubleVar(value=float(p.get("delay_validate", 1.2)))
         self.var_walls_delay_scroll  = tk.DoubleVar(value=float(p.get("delay_scroll", 0.6)))
+        self.var_walls_click_dx      = tk.IntVar(value=int(p.get("click_x_offset", 30)))
+        self.var_walls_click_dy      = tk.IntVar(value=int(p.get("click_y_offset", 0)))
+        self.var_walls_manual_or     = tk.IntVar(value=int(p.get("manual_price_or", 0)))
+        self.var_walls_manual_elexir = tk.IntVar(value=int(p.get("manual_price_elexir", 0)))
 
         grid_p = ttk.Frame(lf_params)
         grid_p.pack(fill="x", padx=5, pady=5)
@@ -366,10 +370,22 @@ class CLASH_GUI(tk.Tk):
         ttk.Entry(grid_p, textvariable=self.var_walls_delay_valid, width=6).grid(row=1, column=5, padx=5)
         ttk.Label(grid_p, text="Délai scroll (s) :").grid(row=2, column=0, sticky="w", pady=3)
         ttk.Entry(grid_p, textvariable=self.var_walls_delay_scroll, width=6).grid(row=2, column=1, padx=5)
+        ttk.Label(grid_p, text="Clic offset X :").grid(row=2, column=2, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_click_dx, width=6).grid(row=2, column=3, padx=5)
+        ttk.Label(grid_p, text="Clic offset Y :").grid(row=2, column=4, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_click_dy, width=6).grid(row=2, column=5, padx=5)
+
+        ttk.Label(grid_p, text="Prix manuel OR :").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Entry(grid_p, textvariable=self.var_walls_manual_or, width=12).grid(row=3, column=1, padx=5)
+        ttk.Label(grid_p, text="Prix manuel ELEXIR :").grid(row=3, column=2, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_manual_elexir, width=12).grid(row=3, column=3, padx=5)
 
         ttk.Label(lf_params,
-                  text="• Scrolls max : combien de fois on tourne la molette dans la liste avant d'abandonner si 'rempart' n'est pas trouvé.\n"
-                       "• Scroll amount : intensité de chaque scroll (négatif = vers le bas).",
+                  text="• Scroll amount : intensité de chaque scroll (négatif = vers le bas).\n"
+                       "• Clic offset X/Y : décalage en px appliqué au point de clic sur la ligne 'Rempart'\n"
+                       "  (augmente Y si le clic atteint la ligne du dessous/dessus).\n"
+                       "• Prix manuel OR / ELEXIR : si > 0, court-circuite l'OCR du prix.\n"
+                       "  Pratique quand le prix est mal lu — entrez le prix réel d'un rempart.",
                   foreground="gray", justify="left").pack(anchor="w", padx=10, pady=2)
 
         # --- Configuration coordonnées ---
@@ -440,13 +456,17 @@ class CLASH_GUI(tk.Tk):
     def save_walls_params(self):
         cfg = walls.load_walls_config()
         cfg.setdefault("params", {})
-        cfg["params"]["keyword"]         = self.var_walls_keyword.get().strip() or "rempart"
-        cfg["params"]["max_scrolls"]     = int(self.var_walls_max_scrolls.get())
-        cfg["params"]["scroll_amount"]   = int(self.var_walls_scroll_amount.get())
-        cfg["params"]["delay_click"]     = float(self.var_walls_delay_click.get())
-        cfg["params"]["delay_open_menu"] = float(self.var_walls_delay_menu.get())
-        cfg["params"]["delay_validate"]  = float(self.var_walls_delay_valid.get())
-        cfg["params"]["delay_scroll"]    = float(self.var_walls_delay_scroll.get())
+        cfg["params"]["keyword"]             = self.var_walls_keyword.get().strip() or "rempart"
+        cfg["params"]["max_scrolls"]         = int(self.var_walls_max_scrolls.get())
+        cfg["params"]["scroll_amount"]       = int(self.var_walls_scroll_amount.get())
+        cfg["params"]["delay_click"]         = float(self.var_walls_delay_click.get())
+        cfg["params"]["delay_open_menu"]     = float(self.var_walls_delay_menu.get())
+        cfg["params"]["delay_validate"]      = float(self.var_walls_delay_valid.get())
+        cfg["params"]["delay_scroll"]        = float(self.var_walls_delay_scroll.get())
+        cfg["params"]["click_x_offset"]      = int(self.var_walls_click_dx.get())
+        cfg["params"]["click_y_offset"]      = int(self.var_walls_click_dy.get())
+        cfg["params"]["manual_price_or"]     = int(self.var_walls_manual_or.get())
+        cfg["params"]["manual_price_elexir"] = int(self.var_walls_manual_elexir.get())
         walls.save_walls_config(cfg)
         self._walls_log("Paramètres sauvegardés.")
         self._refresh_walls_cfg_status()

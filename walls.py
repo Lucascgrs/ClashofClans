@@ -50,15 +50,50 @@ WALLS_DEFAULT_CONFIG = {
         "clic_neutre":      {"x": 5,    "y": 5},
     },
     "params": {
-        "keyword":         "rempart",
-        "max_scrolls":     8,
-        "scroll_amount":   -3,
-        "delay_click":     0.6,
-        "delay_open_menu": 1.5,
-        "delay_validate":  1.2,
-        "delay_scroll":    0.6,
+        "keyword":            "rempart",
+        "max_scrolls":        8,
+        "scroll_amount":      -3,
+        "delay_click":        0.6,
+        "delay_open_menu":    1.5,
+        "delay_validate":     1.2,
+        "delay_scroll":       0.6,
+        "click_x_offset":     30,   # px à droite du leftmost du texte
+        "click_y_offset":     0,    # px sous le centre vertical du texte
+        "manual_price_or":     0,   # > 0 = court-circuite l'OCR du prix
+        "manual_price_elexir": 0,
     },
 }
+
+
+# Substitutions OCR courantes lettre → chiffre, utilisées pour récupérer
+# un prix même quand EasyOCR confond `o`/`0`, `S`/`5`, `B`/`8`, etc.
+_OCR_DIGIT_FIX = str.maketrans({
+    "o": "0", "O": "0", "Q": "0", "D": "0", "d": "0",
+    "l": "1", "I": "1", "i": "1", "|": "1",
+    "S": "5", "s": "5",
+    "Z": "2", "z": "2",
+    "B": "8",
+    "G": "6",
+    "T": "7",
+})
+
+
+def _extract_price(text_after_keyword: str) -> tuple[int, str]:
+    """Renvoie (prix, texte_nettoyé) extrait du tail.
+
+    En CoC, la ligne d'un mur s'écrit "Rempart × N  <prix>" où × N est le
+    nombre de remparts disponibles à améliorer (à ignorer) et seul le
+    groupe de chiffres qui suit est le prix unitaire.
+
+    Étapes :
+        1. Substitutions OCR courantes (lettre → chiffre)
+        2. Suppression d'un éventuel compteur "× N" en tête
+        3. Concaténation de tous les chiffres restants
+    """
+    fixed = text_after_keyword.translate(_OCR_DIGIT_FIX)
+    without_count = re.sub(r"^\s*[xX×*]\s*\d+\s*", " ", fixed, count=1)
+    digits = re.sub(r"\D", "", without_count)
+    return (int(digits) if digits else 0), without_count
 
 
 # Description de l'assistant de configuration : (clé dotée, type, titre, description).
@@ -272,14 +307,29 @@ class WallsUpgrader:
     # ---------- recherche / scroll ----------
 
     def _find_keyword_in_list(self, keyword: str):
-        keyword = keyword.lower()
+        keyword_l = keyword.lower()
+        click_dx = int(self.cfg["params"].get("click_x_offset", 30))
+        click_dy = int(self.cfg["params"].get("click_y_offset", 0))
+
         for line in self._ocr_lines(self.cfg["zones"]["liste_ameliorations"]):
-            if keyword in line["text"].lower().replace("o", "0").replace("O", "0"):
-                tokens = re.sub(r"[^a-zA-Z0-9 ]", " ", line["text"]).split()
-                prix = next((int(t) for t in reversed(tokens) if t.isdigit()), 0)
-                cx = line["left"] + 20
-                cy = (line["top"] + line["bot"]) / 2
-                return line["text"], prix, int(cx), int(cy)
+            text = line["text"]
+            text_l = text.lower()
+            idx = text_l.find(keyword_l)
+            if idx < 0:
+                continue
+
+            tail = text[idx + len(keyword):]
+            prix, fixed_tail = _extract_price(tail)
+            cx = line["left"] + click_dx
+            cy = (line["top"] + line["bot"]) / 2 + click_dy
+
+            self.log(f"  ligne brute   : '{text}'")
+            self.log(f"  après mot-clé : '{tail}'")
+            self.log(f"  sans compteur : '{fixed_tail}'  →  prix = {prix}")
+            self.log(f"  clic prévu    : ({int(cx)}, {int(cy)})  "
+                     f"[bbox={line['left']}..{line['right']} / "
+                     f"{line['top']}..{line['bot']}]")
+            return text, prix, int(cx), int(cy)
         return None
 
     def _open_workers_menu(self) -> None:
@@ -351,9 +401,19 @@ class WallsUpgrader:
         if not found:
             self.log(f"[{label}] Rempart introuvable dans la liste.")
             return False
-        nom, prix, x, y = found
+        nom, prix_ocr, x, y = found
+
+        manual = int(self.cfg["params"].get(f"manual_price_{resource}", 0))
+        if manual > 0:
+            self.log(f"[{label}] Prix manuel forcé : {manual} (OCR ignoré : {prix_ocr})")
+            prix = manual
+        else:
+            prix = prix_ocr
+
         if prix <= 0:
-            self.log(f"[{label}] Prix illisible pour '{nom}'.")
+            self.log(f"[{label}] Prix illisible pour '{nom}' "
+                     f"(OCR={prix_ocr}, manuel=0). Définissez manual_price_{resource} "
+                     f"pour court-circuiter l'OCR.")
             return False
         nb = min(amount // prix, workers_free)
         if nb <= 0:
