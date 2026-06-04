@@ -1,61 +1,72 @@
 {
     "zones": {
         "ouvriers": {
-            "x1": 255,
-            "y1": 233,
-            "x2": 255,
-            "y2": 236
+            "x1": 371,
+            "y1": 356,
+            "x2": 554,
+            "y2": 462
         },
         "or": {
-            "x1": 272,
-            "y1": 251,
-            "x2": 276,
-            "y2": 260
+            "x1": 349,
+            "y1": 297,
+            "x2": 638,
+            "y2": 468
         },
         "elexir": {
-            "x1": 276,
-            "y1": 261,
-            "x2": 276,
-            "y2": 261
+            "x1": 378,
+            "y1": 311,
+            "x2": 524,
+            "y2": 427
         },
         "liste_ameliorations": {
-            "x1": 277,
-            "y1": 261,
-            "x2": 279,
-            "y2": 262
+            "x1": 368,
+            "y1": 312,
+            "x2": 587,
+            "y2": 430
         }
     },
     "buttons": {
         "info_ouvriers": {
-            "x": 280,
-            "y": 262
+            "x": 311,
+            "y": 294
         },
         "ameliorer_plus": {
-            "x": 377,
-            "y": 269
+            "x": 495,
+            "y": 515
+        },
+        "ameliorer_or": {
+            "x": 669,
+            "y": 518
         },
         "valider_or": {
-            "x": 395,
-            "y": 278
+            "x": 489,
+            "y": 419
+        },
+        "ameliorer_elexir": {
+            "x": 696,
+            "y": 521
         },
         "valider_elexir": {
-            "x": 395,
-            "y": 278
-        },
-        "suivant_page": {
-            "x": 393,
-            "y": 278
+            "x": 434,
+            "y": 393
         },
         "clic_neutre": {
+            "x": 0,
+            "y": 0
+        },
+        "suivant_page": {
             "x": 393,
             "y": 278
         }
     },
     "params": {
         "keyword": "Rempart",
-        "max_pages": 6,
+        "max_scrolls": 8,
+        "scroll_amount": -3,
         "delay_click": 2.0,
         "delay_open_menu": 3.0,
-        "delay_validate": 1.2
+        "delay_validate": 1.2,
+        "delay_scroll": 0.6,
+        "max_pages": 6
     }
 }

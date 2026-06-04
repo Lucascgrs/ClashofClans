@@ -41,9 +41,35 @@ class CLASH_GUI(tk.Tk):
         self.walls_stop_event = threading.Event()
         self.walls_thread = None
 
+    def _make_scrollable_tab(self, title):
+        """Crée un onglet dont le contenu est scrollable verticalement.
+        Retourne le frame intérieur dans lequel ajouter les widgets."""
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text=title)
+
+        canvas = tk.Canvas(tab, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfig(inner_id, width=e.width))
+
+        def _on_wheel(event):
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+        inner.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_wheel))
+        inner.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        return inner
+
     def create_scan_tab(self):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="🔎 Scanner & Filtres")
+        frame = self._make_scrollable_tab("🔎 Scanner & Filtres")
 
         # --- Zone Filtres Joueurs ---
         lf_filters = ttk.LabelFrame(frame, text="Filtres de Recherche Joueurs")
@@ -184,8 +210,7 @@ class CLASH_GUI(tk.Tk):
         self.txt_tags.pack(fill="both", expand=True, padx=10, pady=5)
 
     def create_game_tab(self):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="🎮 Jeu & Automatisation")
+        frame = self._make_scrollable_tab("🎮 Jeu & Automatisation")
 
         # --- Gestion Fichiers Actions ---
         col1 = ttk.Frame(frame)
@@ -279,15 +304,25 @@ class CLASH_GUI(tk.Tk):
         ttk.Entry(grid_atk, textvariable=self.var_nb_atk, width=5).grid(row=0, column=3)
         ttk.Label(grid_atk, text="Nuit:").grid(row=0, column=4)
         ttk.Entry(grid_atk, textvariable=self.var_nb_night, width=5).grid(row=0, column=5)
-        
+
+        # --- Rituel d'amélioration des remparts intercalé ---
+        f_walls_ritual = ttk.Frame(lf_atk)
+        f_walls_ritual.pack(fill="x", pady=5)
+        self.var_walls_ritual_enabled = tk.BooleanVar(value=False)
+        self.var_walls_ritual_every   = tk.IntVar(value=5)
+        ttk.Checkbutton(f_walls_ritual,
+                        text="Améliorer les remparts toutes les",
+                        variable=self.var_walls_ritual_enabled).pack(side="left", padx=5)
+        ttk.Entry(f_walls_ritual, textvariable=self.var_walls_ritual_every, width=4).pack(side="left")
+        ttk.Label(f_walls_ritual, text="attaques (défaites + jour + nuit)").pack(side="left", padx=5)
+
         ttk.Button(lf_atk, text="⚔ LANCER SESSION D'ATTAQUE", command=self.run_auto_attack).pack(fill="x", padx=5, pady=10)
         
         # Initialiser la liste et les combobox une fois que tout est créé
         self.refresh_action_files()
 
     def create_walls_tab(self):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="🧱 Auto Remparts")
+        frame = self._make_scrollable_tab("🧱 Auto Remparts")
 
         # --- Paramètres ---
         lf_params = ttk.LabelFrame(frame, text="Paramètres")
@@ -921,8 +956,13 @@ class CLASH_GUI(tk.Tk):
             messagebox.showwarning("Attention", "Veuillez choisir une stratégie principale.")
             return
 
+        walls_every = (int(self.var_walls_ritual_every.get())
+                       if self.var_walls_ritual_enabled.get() else 0)
+
         def task():
             self.log("Démarrage de la session d'attaques...")
+            if walls_every > 0:
+                self.log(f"Rituel remparts activé : toutes les {walls_every} attaques.")
             try:
                 # On passe la liste dynamique au lieu des comptes harcodés
                 PlayActions.attaque_with_all_accounts(
@@ -931,12 +971,14 @@ class CLASH_GUI(tk.Tk):
                     attaques_night=nb_night,
                     strategy_file=strat,
                     night_strategy_file=strat_night,
-                    custom_accounts_list=actions_to_run
+                    custom_accounts_list=actions_to_run,
+                    walls_every=walls_every,
+                    walls_log_callback=self.log,
                 )
                 self.log("Session d'attaques terminée.")
             except Exception as e:
                 self.log(f"Erreur Attaques: {e}")
-        
+
         threading.Thread(target=task).start()
 
     def load_parquet(self, filename):

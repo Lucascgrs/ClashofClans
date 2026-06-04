@@ -287,15 +287,18 @@ class OCR:
             print(self.dict_ameliorations)
 
 
-def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9, 
-                              strategy_file="attaquehdv13+4herosbis.json", 
+def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9,
+                              strategy_file="attaquehdv13+4herosbis.json",
                               night_strategy_file="attaquenightMDO9.json",
-                              allow_tilu=None, allow_ptitlulu=None, 
+                              allow_tilu=None, allow_ptitlulu=None,
                               allow_lucas=None, allow_citeor=None,
-                              custom_accounts_list=None):
+                              custom_accounts_list=None,
+                              walls_every=0, walls_log_callback=None):
     """
     Lance les attaques sur les comptes sélectionnés avec les stratégies choisies.
     custom_accounts_list : liste de tuples (True, "fichier_switch.json")
+    walls_every : si > 0, lance le rituel WallsUpgrader.run() toutes les N attaques
+                  (défaites + jour + nuit confondues).
     """
     if custom_accounts_list:
         actions_to_run = custom_accounts_list
@@ -307,22 +310,37 @@ def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9,
             (allow_citeor, "switchciteor.json"),
             (allow_lucas, "switch_lucas_.json")
         ]
-    
-    # Liste pour définir si on doit changer d'armée (spécifique à Tilu dans votre code original)
-    # Adaptez si besoin pour les autres
-    
+
+    # Compteur partagé pour le rituel remparts (encapsulé dans une liste pour la closure)
+    attack_counter = [0]
+
+    def _maybe_run_walls():
+        if walls_every <= 0:
+            return
+        attack_counter[0] += 1
+        if attack_counter[0] >= walls_every:
+            attack_counter[0] = 0
+            log = walls_log_callback or print
+            log(f"--- Rituel d'amélioration des remparts (toutes les {walls_every} attaques) ---")
+            try:
+                # Petit délai pour s'assurer qu'on est bien revenu au village
+                time.sleep(1.5)
+                WallsUpgrader(log_callback=log).run()
+            except Exception as e:
+                log(f"Erreur rituel remparts : {e}")
+
     for allow, switch_json in actions_to_run:
         if allow:
             print(f"--- Connexion : {switch_json} ---")
             LecteurPosition(fichier_entree=switch_json).rejouer()
             time.sleep(3)
             LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            
+
             # Sélection armée 1 (Standard)
             LecteurPosition(fichier_entree="selectfirstarmy.json").rejouer()
             LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
             time.sleep(1)
-            
+
             # Phase : Perdre des trophées
             if defaites > 0:
                 print(f"Lancement de {defaites} défaites...")
@@ -330,7 +348,8 @@ def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9,
                     LecteurPosition(fichier_entree="lose.json").rejouer()
                     time.sleep(3)
                     LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
-            
+                    _maybe_run_walls()
+
             # Phase : Attaques principales
             if attaques > 0:
                 print(f"Lancement de {attaques} attaques avec {strategy_file}...")
@@ -338,6 +357,7 @@ def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9,
                     LecteurPosition(fichier_entree=strategy_file).rejouer()
                     time.sleep(3)
                     LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
+                    _maybe_run_walls()
 
             # Cas particulier Tilu (Switch army) - Optionnel, à garder si nécessaire
             if "tilu" in switch_json and allow_tilu:
@@ -353,11 +373,12 @@ def attaque_with_all_accounts(defaites=6, attaques=20, attaques_night=9,
                     time.sleep(3)
                     LecteurPosition(fichier_entree="cliclefttop.json").rejouer()
                     time.sleep(3)
-                    try: 
+                    try:
                         LecteurPosition(fichier_entree="getnightelexir.json").rejouer()
                     except:
                         pass
-                
+                    _maybe_run_walls()
+
                 time.sleep(2)
                 LecteurPosition(fichier_entree="clicnormalboat.json").rejouer()
                 time.sleep(3)
