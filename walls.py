@@ -21,6 +21,10 @@ import cv2
 import dxcam
 import pyautogui
 
+# Désactive le "failsafe" qui interrompt le script si le curseur atteint un
+# coin de l'écran : le clic neutre est volontairement placé en haut-gauche.
+pyautogui.FAILSAFE = False
+
 import playback  # initialise le DPI awareness
 
 
