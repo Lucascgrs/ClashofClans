@@ -217,11 +217,12 @@ class WallsUpgrader:
         return " ".join(r[1] for r in results)
 
     def _ocr_lines(self, zone: dict, line_threshold: int = 22):
-        """OCR + regroupement par lignes. Coordonnées en absolu écran."""
+        """OCR + regroupement par lignes. Coordonnées en absolu écran.
+        Retourne (lignes, image_binarisée, (offset_x, offset_y))."""
         self._init_capture()
         img, (ox, oy) = self._grab(zone)
         if img is None:
-            return []
+            return [], None, (0, 0)
         results = self._reader.readtext(img)
         detections = []
         for bbox, text, _conf in results:
@@ -258,7 +259,7 @@ class WallsUpgrader:
                 "bot":   max(d["bot"]   for d in line),
                 "cy":    sum(d["cy"]    for d in line) / len(line),
             })
-        return merged
+        return merged, img, (ox, oy)
 
     # ---------- lectures ----------
 
@@ -311,7 +312,8 @@ class WallsUpgrader:
         click_dx = int(self.cfg["params"].get("click_x_offset", 30))
         click_dy = int(self.cfg["params"].get("click_y_offset", 0))
 
-        for line in self._ocr_lines(self.cfg["zones"]["liste_ameliorations"]):
+        lines, img, (ox, oy) = self._ocr_lines(self.cfg["zones"]["liste_ameliorations"])
+        for line in lines:
             text = line["text"]
             text_l = text.lower()
             idx = text_l.find(keyword_l)
@@ -329,8 +331,34 @@ class WallsUpgrader:
             self.log(f"  clic prévu    : ({int(cx)}, {int(cy)})  "
                      f"[bbox={line['left']}..{line['right']} / "
                      f"{line['top']}..{line['bot']}]")
+            self._save_debug_image(img, line, (ox, oy), prix)
             return text, prix, int(cx), int(cy)
         return None
+
+    def _save_debug_image(self, img, line, offset, prix) -> None:
+        """Sauvegarde l'image binarisée vue par l'OCR, avec un rectangle
+        autour de la ligne correspondant au mot-clé."""
+        if img is None:
+            return
+        try:
+            debug_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "debug_ocr"
+            )
+            os.makedirs(debug_dir, exist_ok=True)
+            ox, oy = offset
+            # Annotation : on dessine la bbox de la ligne (en coords relatives à l'image)
+            annotated = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            x1 = max(0, int(line["left"]  - ox))
+            x2 = max(0, int(line["right"] - ox))
+            y1 = max(0, int(line["top"]   - oy))
+            y2 = max(0, int(line["bot"]   - oy))
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(debug_dir, f"ocr_{ts}_prix{prix}.png")
+            cv2.imwrite(path, annotated)
+            self.log(f"  → screenshot OCR sauvegardé : {path}")
+        except Exception as e:
+            self.log(f"  → erreur sauvegarde debug : {e}")
 
     def _open_workers_menu(self) -> None:
         self._click_button("clic_neutre")
