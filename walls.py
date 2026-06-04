@@ -420,10 +420,14 @@ class WallsUpgrader:
 
     def _phase(self, resource: str, amount: int, workers_free: int) -> bool:
         """Exécute une phase (OR ou ELEXIR). Retourne True si au moins un
-        rempart a été amélioré."""
+        rempart a été amélioré.
+
+        Les améliorations de rempart sont instantanées : 1 ouvrier libre suffit
+        pour améliorer N remparts d'un coup. Le nombre n'est donc borné que
+        par la ressource (or ou élixir) divisée par le prix unitaire."""
         label = "OR" if resource == "or" else "ELEXIR"
-        if workers_free <= 0:
-            self.log(f"[{label}] Plus d'ouvrier libre.")
+        if workers_free < 1:
+            self.log(f"[{label}] Aucun ouvrier libre (il en faut au moins 1).")
             return False
         found = self._scan_for_rempart()
         if not found:
@@ -443,11 +447,12 @@ class WallsUpgrader:
                      f"(OCR={prix_ocr}, manuel=0). Définissez manual_price_{resource} "
                      f"pour court-circuiter l'OCR.")
             return False
-        nb = min(amount // prix, workers_free)
+        nb = amount // prix
         if nb <= 0:
-            self.log(f"[{label}] Pas assez ({amount} < {prix}) ou plus d'ouvriers.")
+            self.log(f"[{label}] Pas assez de ressource ({amount} < {prix}).")
             return False
-        self.log(f"[{label}] {amount} à {prix}/rempart, {workers_free} ouvriers → {nb} rempart(s).")
+        self.log(f"[{label}] {amount} à {prix}/rempart → {nb} rempart(s) "
+                 f"(1 ouvrier requis, {workers_free} disponible(s)).")
         self._do_upgrade(x, y, nb, resource)
         return True
 
