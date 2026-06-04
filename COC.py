@@ -285,9 +285,8 @@ class RateLimiter:
 
 _rate_limiter = RateLimiter(max_per_second=10)
 
-
-def safe_get(url: str, headers: dict, params: dict = None,
-             retries: int = 3, delay: int = 2) -> requests.Response | None:
+from typing import Optional
+def safe_get(url: str, headers: dict, params: dict = None, retries: int = 3, delay: int = 2) -> Optional[requests.Response]:
     """GET HTTP avec rate limiting, gestion 429, retry + backoff exponentiel."""
     for attempt in range(retries):
         try:
