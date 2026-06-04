@@ -294,8 +294,10 @@ class WallsUpgrader:
         z = self.cfg["zones"]["liste_ameliorations"]
         cx = (z["x1"] + z["x2"]) // 2
         cy = (z["y1"] + z["y2"]) // 2
+        amount = int(self.cfg["params"].get("scroll_amount", -3))
+        self.log(f"  scroll: moveTo({cx}, {cy}) puis pyautogui.scroll({amount})")
         pyautogui.moveTo(cx, cy)
-        pyautogui.scroll(int(self.cfg["params"].get("scroll_amount", -3)))
+        pyautogui.scroll(amount)
         self._sleep(self.cfg["params"].get("delay_scroll", 0.5))
 
     def _scan_for_rempart(self):
