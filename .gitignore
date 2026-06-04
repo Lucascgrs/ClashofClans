@@ -3,7 +3,7 @@
 .env
 *.parquet
 *.xlsx
-
+walls_config.json
 
 # Mais garder les répertoires (pour descendre dans l'arborescence)
 !Actions/

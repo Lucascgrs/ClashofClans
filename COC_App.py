@@ -296,21 +296,22 @@ class CLASH_GUI(tk.Tk):
         cfg = PlayActions.load_walls_config()
         p = cfg.get("params", {})
 
-        self.var_walls_keyword = tk.StringVar(value=p.get("keyword", "rempart"))
-        self.var_walls_max_pages = tk.IntVar(value=int(p.get("max_pages", 6)))
-        self.var_walls_loops = tk.IntVar(value=1)
-        self.var_walls_delay_click = tk.DoubleVar(value=float(p.get("delay_click", 0.6)))
-        self.var_walls_delay_menu = tk.DoubleVar(value=float(p.get("delay_open_menu", 1.5)))
-        self.var_walls_delay_valid = tk.DoubleVar(value=float(p.get("delay_validate", 1.2)))
+        self.var_walls_keyword       = tk.StringVar(value=p.get("keyword", "rempart"))
+        self.var_walls_max_scrolls   = tk.IntVar(value=int(p.get("max_scrolls", 8)))
+        self.var_walls_scroll_amount = tk.IntVar(value=int(p.get("scroll_amount", -3)))
+        self.var_walls_delay_click   = tk.DoubleVar(value=float(p.get("delay_click", 0.6)))
+        self.var_walls_delay_menu    = tk.DoubleVar(value=float(p.get("delay_open_menu", 1.5)))
+        self.var_walls_delay_valid   = tk.DoubleVar(value=float(p.get("delay_validate", 1.2)))
+        self.var_walls_delay_scroll  = tk.DoubleVar(value=float(p.get("delay_scroll", 0.6)))
 
         grid_p = ttk.Frame(lf_params)
         grid_p.pack(fill="x", padx=5, pady=5)
         ttk.Label(grid_p, text="Mot-clé :").grid(row=0, column=0, sticky="w")
         ttk.Entry(grid_p, textvariable=self.var_walls_keyword, width=12).grid(row=0, column=1, padx=5)
-        ttk.Label(grid_p, text="Pages max :").grid(row=0, column=2, sticky="w")
-        ttk.Entry(grid_p, textvariable=self.var_walls_max_pages, width=6).grid(row=0, column=3, padx=5)
-        ttk.Label(grid_p, text="Cycles :").grid(row=0, column=4, sticky="w")
-        ttk.Entry(grid_p, textvariable=self.var_walls_loops, width=6).grid(row=0, column=5, padx=5)
+        ttk.Label(grid_p, text="Scrolls max :").grid(row=0, column=2, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_max_scrolls, width=6).grid(row=0, column=3, padx=5)
+        ttk.Label(grid_p, text="Scroll amount :").grid(row=0, column=4, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_scroll_amount, width=6).grid(row=0, column=5, padx=5)
 
         ttk.Label(grid_p, text="Délai clic (s) :").grid(row=1, column=0, sticky="w", pady=3)
         ttk.Entry(grid_p, textvariable=self.var_walls_delay_click, width=6).grid(row=1, column=1, padx=5)
@@ -318,6 +319,13 @@ class CLASH_GUI(tk.Tk):
         ttk.Entry(grid_p, textvariable=self.var_walls_delay_menu, width=6).grid(row=1, column=3, padx=5)
         ttk.Label(grid_p, text="Délai valid (s) :").grid(row=1, column=4, sticky="w")
         ttk.Entry(grid_p, textvariable=self.var_walls_delay_valid, width=6).grid(row=1, column=5, padx=5)
+        ttk.Label(grid_p, text="Délai scroll (s) :").grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Entry(grid_p, textvariable=self.var_walls_delay_scroll, width=6).grid(row=2, column=1, padx=5)
+
+        ttk.Label(lf_params,
+                  text="• Scrolls max : combien de fois on tourne la molette dans la liste avant d'abandonner si 'rempart' n'est pas trouvé.\n"
+                       "• Scroll amount : intensité de chaque scroll (négatif = vers le bas).",
+                  foreground="gray", justify="left").pack(anchor="w", padx=10, pady=2)
 
         # --- Configuration coordonnées ---
         lf_cfg = ttk.LabelFrame(frame, text="Configuration des coordonnées")
@@ -388,10 +396,12 @@ class CLASH_GUI(tk.Tk):
         cfg = PlayActions.load_walls_config()
         cfg.setdefault("params", {})
         cfg["params"]["keyword"]         = self.var_walls_keyword.get().strip() or "rempart"
-        cfg["params"]["max_pages"]       = int(self.var_walls_max_pages.get())
+        cfg["params"]["max_scrolls"]     = int(self.var_walls_max_scrolls.get())
+        cfg["params"]["scroll_amount"]   = int(self.var_walls_scroll_amount.get())
         cfg["params"]["delay_click"]     = float(self.var_walls_delay_click.get())
         cfg["params"]["delay_open_menu"] = float(self.var_walls_delay_menu.get())
         cfg["params"]["delay_validate"]  = float(self.var_walls_delay_valid.get())
+        cfg["params"]["delay_scroll"]    = float(self.var_walls_delay_scroll.get())
         PlayActions.save_walls_config(cfg)
         self._walls_log("Paramètres sauvegardés.")
         self._refresh_walls_cfg_status()
@@ -536,7 +546,6 @@ class CLASH_GUI(tk.Tk):
             return
         self.save_walls_params()
         self.walls_stop_event.clear()
-        loops = max(1, int(self.var_walls_loops.get()))
 
         def task():
             try:
@@ -544,8 +553,8 @@ class CLASH_GUI(tk.Tk):
                     log_callback=self._walls_log,
                     stop_event=self.walls_stop_event,
                 )
-                self._walls_log(f"=== Lancement Auto-Remparts ({loops} cycle(s)) ===")
-                upg.run(loops=loops)
+                self._walls_log("=== Lancement Auto-Remparts ===")
+                upg.run()
             except Exception as e:
                 self._walls_log(f"Erreur Auto-Remparts : {e}")
 

@@ -386,19 +386,22 @@ WALLS_DEFAULT_CONFIG = {
         "liste_ameliorations":   {"x1": 700,  "y1": 180, "x2": 1263, "y2": 800},
     },
     "buttons": {
-        "info_ouvriers":  {"x": 100,  "y": 200},
-        "ameliorer_plus": {"x": 1200, "y": 500},
-        "valider_or":     {"x": 700,  "y": 600},
-        "valider_elexir": {"x": 800,  "y": 600},
-        "suivant_page":   {"x": 1300, "y": 400},
-        "clic_neutre":    {"x": 5,    "y": 5},
+        "info_ouvriers":   {"x": 100,  "y": 200},
+        "ameliorer_plus":  {"x": 1200, "y": 500},
+        "ameliorer_or":    {"x": 700,  "y": 600},
+        "valider_or":      {"x": 700,  "y": 700},
+        "ameliorer_elexir":{"x": 800,  "y": 600},
+        "valider_elexir":  {"x": 800,  "y": 700},
+        "clic_neutre":     {"x": 5,    "y": 5},
     },
     "params": {
         "keyword":         "rempart",
-        "max_pages":       6,
+        "max_scrolls":     8,
+        "scroll_amount":   -3,
         "delay_click":     0.6,
         "delay_open_menu": 1.5,
         "delay_validate":  1.2,
+        "delay_scroll":    0.6,
     },
 }
 
@@ -416,23 +419,26 @@ WALLS_CONFIG_STEPS = [
      "Zone ELEXIR",
      "Délimitez le rectangle autour du nombre d'ELEXIR (ressource violette)."),
     ("zones.liste_ameliorations", "zone",
-     "Zone LISTE AMÉLIORATIONS",
-     "Ouvrez la liste des améliorations (info ouvriers) puis délimitez les 2 coins (haut-gauche et bas-droit) du grand rectangle qui contient la liste."),
+     "Zone LISTE AMÉLIORATIONS (scrollable)",
+     "Ouvrez la liste des améliorations (info ouvriers) puis délimitez les 2 coins (haut-gauche et bas-droit) du grand rectangle qui contient la liste. Le programme scrollera la molette à l'intérieur de cette zone pour faire défiler."),
     ("buttons.info_ouvriers",     "point",
      "Bouton 'i' Info Ouvriers",
      "Placez la souris sur le petit 'i' à côté de l'icône des ouvriers et appuyez sur ENTRÉE."),
     ("buttons.ameliorer_plus",    "point",
      "Bouton AMÉLIORER PLUS (+)",
-     "Placez la souris sur le bouton 'Améliorer plus' (le bouton qui ajoute un rempart à l'amélioration en cours)."),
+     "Placez la souris sur le bouton 'Améliorer plus' (qui ajoute un rempart à l'amélioration en cours)."),
+    ("buttons.ameliorer_or",      "point",
+     "Bouton AMÉLIORER (OR)",
+     "Placez la souris sur le bouton 'Améliorer' affiché avec le prix en OR (1er bouton, avant la confirmation)."),
     ("buttons.valider_or",        "point",
      "Bouton VALIDER (OR)",
-     "Placez la souris sur le bouton qui valide l'amélioration payée en OR."),
+     "Placez la souris sur le bouton 'Valider' de la popup de confirmation pour l'amélioration en OR."),
+    ("buttons.ameliorer_elexir",  "point",
+     "Bouton AMÉLIORER (ELEXIR)",
+     "Placez la souris sur le bouton 'Améliorer' affiché avec le prix en ELEXIR (1er bouton, avant la confirmation)."),
     ("buttons.valider_elexir",    "point",
      "Bouton VALIDER (ELEXIR)",
-     "Placez la souris sur le bouton qui valide l'amélioration payée en ELEXIR."),
-    ("buttons.suivant_page",      "point",
-     "Bouton PAGE SUIVANTE",
-     "Placez la souris sur le bouton 'Suivant' dans la fenêtre d'info ouvriers (pour faire défiler la liste)."),
+     "Placez la souris sur le bouton 'Valider' de la popup de confirmation pour l'amélioration en ELEXIR."),
     ("buttons.clic_neutre",       "point",
      "CLIC NEUTRE (fermeture)",
      "Placez la souris sur un endroit neutre (typiquement en haut à gauche) qui ferme les pop-ups et revient au village."),
@@ -636,106 +642,126 @@ class WallsUpgrader:
         self._click_button('info_ouvriers')
         self._sleep(self.cfg['params']['delay_open_menu'])
 
+    def _scroll_list(self):
+        """Scrolle la molette à l'intérieur de la zone liste_ameliorations."""
+        if self._check_stop():
+            return
+        z = self.cfg['zones']['liste_ameliorations']
+        cx = (z['x1'] + z['x2']) // 2
+        cy = (z['y1'] + z['y2']) // 2
+        amount = int(self.cfg['params'].get('scroll_amount', -3))
+        pyautogui.moveTo(cx, cy)
+        pyautogui.scroll(amount)
+        self._sleep(self.cfg['params'].get('delay_scroll', 0.5))
+
     def _scan_for_rempart(self):
-        """Ouvre le menu, fait défiler les pages, renvoie (nom, prix, x, y) ou None."""
+        """Ouvre le menu, scrolle dans la liste, renvoie (nom, prix, x, y) ou None."""
         keyword = self.cfg['params'].get('keyword', 'rempart')
-        max_pages = int(self.cfg['params'].get('max_pages', 6))
+        max_scrolls = int(self.cfg['params'].get('max_scrolls', 8))
         self._open_workers_menu()
-        for page in range(max_pages):
+        # 1ère lecture sans scroll
+        found = self._find_keyword_in_list(keyword)
+        if found:
+            self.log(f"[scroll 0] Trouvé : '{found[0]}' (prix {found[1]})")
+            return found
+        for s in range(1, max_scrolls + 1):
             if self._check_stop():
                 return None
+            self.log(f"[scroll {s}/{max_scrolls}] Pas de '{keyword}' visible, scroll vers le bas.")
+            self._scroll_list()
             found = self._find_keyword_in_list(keyword)
             if found:
-                self.log(f"[Page {page+1}] Trouvé : '{found[0]}' (prix {found[1]})")
+                self.log(f"[scroll {s}] Trouvé : '{found[0]}' (prix {found[1]})")
                 return found
-            self.log(f"[Page {page+1}] Pas de '{keyword}' visible, page suivante.")
-            self._click_button('suivant_page')
-            self._sleep(self.cfg['params']['delay_open_menu'])
         return None
 
-    def _do_upgrade(self, click_x, click_y, nb, valider_key):
-        """Clique sur la ligne rempart, +nb fois sur 'améliorer plus', puis valide."""
-        self.log(f"→ Sélection rempart + {nb} clics 'améliorer plus' + valider ({valider_key})")
+    def _do_upgrade(self, click_x, click_y, nb, resource):
+        """Clique sur la ligne rempart, +nb fois sur 'améliorer plus',
+        puis sur 'améliorer (resource)' et 'valider (resource)'.
+        resource ∈ {'or', 'elexir'}."""
+        ameliorer_key = f'ameliorer_{resource}'
+        valider_key   = f'valider_{resource}'
+        self.log(f"→ Sélection rempart, {nb} clic(s) 'améliorer plus', améliorer {resource}, valider {resource}")
         self._click_xy(click_x, click_y, delay=self.cfg['params']['delay_open_menu'])
-        for i in range(nb):
+        for _ in range(nb):
             if self._check_stop():
                 return
             self._click_button('ameliorer_plus')
         self._sleep(self.cfg['params']['delay_click'])
-        self._click_button(valider_key, delay=self.cfg['params']['delay_validate'])
+        self._click_button(ameliorer_key, delay=self.cfg['params']['delay_validate'])
+        self._click_button(valider_key,   delay=self.cfg['params']['delay_validate'])
         self._click_button('clic_neutre')
         self._sleep(self.cfg['params']['delay_click'])
 
     # ---------- orchestration ----------
 
-    def run_once(self):
-        """Une passe complète : lit l'état, améliore avec or, puis avec elexir."""
-        if self._check_stop():
-            return False
-
-        state = self.read_state()
-        if state['workers_free'] <= 0:
-            self.log("Aucun ouvrier libre — rien à faire.")
-            return False
-
-        # --- Phase 1 : OR ---
-        found = self._scan_for_rempart()
-        if not found:
-            self.log("Aucun rempart trouvé dans les améliorations possibles.")
-            return False
-        nom, prix, x, y = found
-        if prix <= 0:
-            self.log(f"Prix illisible pour '{nom}' — annulation.")
-            return False
-
-        did_anything = False
-        nb_or = state['gold'] // prix if prix > 0 else 0
-        if nb_or > 0:
-            self.log(f"Avec {state['gold']} OR à {prix}/rempart → {nb_or} rempart(s).")
-            self._do_upgrade(x, y, nb_or, 'valider_or')
-            did_anything = True
-        else:
-            self.log(f"Pas assez d'OR ({state['gold']} < {prix}) pour un rempart.")
-
-        if self._check_stop():
-            return did_anything
-
-        # --- Phase 2 : ELEXIR (relire l'état car des ouvriers ont été consommés) ---
-        state2 = self.read_state()
-        if state2['workers_free'] <= 0:
-            self.log("Plus d'ouvrier libre après la phase OR.")
-            return did_anything
-
-        found2 = self._scan_for_rempart()
-        if not found2:
-            self.log("Rempart introuvable pour la phase ELEXIR.")
-            return did_anything
-        nom2, prix2, x2, y2 = found2
-        if prix2 <= 0:
-            self.log(f"Prix illisible (elexir) pour '{nom2}' — annulation.")
-            return did_anything
-
-        nb_el = state2['elexir'] // prix2 if prix2 > 0 else 0
-        # Borner par le nombre d'ouvriers restants
-        nb_el = min(nb_el, state2['workers_free'])
-        if nb_el > 0:
-            self.log(f"Avec {state2['elexir']} ELEXIR à {prix2}/rempart → {nb_el} rempart(s).")
-            self._do_upgrade(x2, y2, nb_el, 'valider_elexir')
-            did_anything = True
-        else:
-            self.log(f"Pas assez d'ELEXIR ({state2['elexir']} < {prix2}) ou plus d'ouvriers.")
-
-        return did_anything
-
-    def run(self, loops=1):
-        for i in range(max(1, int(loops))):
+    def run(self):
+        """Lit l'état, améliore les remparts avec OR puis avec ELEXIR.
+        Le nombre de remparts est borné par les ressources ET par les ouvriers libres."""
+        try:
             if self._check_stop():
-                self.log("Arrêt demandé.")
-                return
-            self.log(f"=== Cycle {i+1}/{loops} ===")
-            try:
-                self.run_once()
-            except Exception as e:
-                self.log(f"Erreur durant le cycle : {e}")
-                return
-        self.log("=== Terminé ===")
+                return False
+
+            state = self.read_state()
+            if state['workers_free'] <= 0:
+                self.log("Aucun ouvrier libre — rien à faire.")
+                return False
+
+            # --- Phase 1 : OR ---
+            found = self._scan_for_rempart()
+            if not found:
+                self.log("Aucun rempart trouvé dans les améliorations possibles.")
+                return False
+            nom, prix, x, y = found
+            if prix <= 0:
+                self.log(f"Prix illisible pour '{nom}' — annulation.")
+                return False
+
+            did_anything = False
+            nb_or = state['gold'] // prix
+            nb_or = min(nb_or, state['workers_free'])
+            if nb_or > 0:
+                self.log(f"Avec {state['gold']} OR à {prix}/rempart et "
+                         f"{state['workers_free']} ouvriers → {nb_or} rempart(s).")
+                self._do_upgrade(x, y, nb_or, 'or')
+                did_anything = True
+            else:
+                self.log(f"Pas assez d'OR ({state['gold']} < {prix}) pour un rempart.")
+
+            if self._check_stop():
+                self.log("=== Arrêté ===")
+                return did_anything
+
+            # --- Phase 2 : ELEXIR (relire l'état car des ouvriers ont été consommés) ---
+            state2 = self.read_state()
+            if state2['workers_free'] <= 0:
+                self.log("Plus d'ouvrier libre après la phase OR.")
+                self.log("=== Terminé ===")
+                return did_anything
+
+            found2 = self._scan_for_rempart()
+            if not found2:
+                self.log("Rempart introuvable pour la phase ELEXIR.")
+                self.log("=== Terminé ===")
+                return did_anything
+            nom2, prix2, x2, y2 = found2
+            if prix2 <= 0:
+                self.log(f"Prix illisible (elexir) pour '{nom2}' — annulation.")
+                self.log("=== Terminé ===")
+                return did_anything
+
+            nb_el = state2['elexir'] // prix2
+            nb_el = min(nb_el, state2['workers_free'])
+            if nb_el > 0:
+                self.log(f"Avec {state2['elexir']} ELEXIR à {prix2}/rempart et "
+                         f"{state2['workers_free']} ouvriers → {nb_el} rempart(s).")
+                self._do_upgrade(x2, y2, nb_el, 'elexir')
+                did_anything = True
+            else:
+                self.log(f"Pas assez d'ELEXIR ({state2['elexir']} < {prix2}).")
+
+            self.log("=== Terminé ===")
+            return did_anything
+        except Exception as e:
+            self.log(f"Erreur : {e}")
+            return False
