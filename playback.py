@@ -80,19 +80,36 @@ class LecteurPosition:
                 return getattr(Key, k)
         return nom
 
-    def rejouer(self, vitesse: float = 1.0, delai_initial: float = 2.0) -> None:
+    def rejouer(self, vitesse: float = 1.0, delai_initial: float = 2.0,
+                stop_event=None) -> None:
         if not self.charger_actions():
             return
 
+        def _stop() -> bool:
+            return stop_event is not None and stop_event.is_set()
+
         print(f"--- Lecture de {os.path.basename(self.fichier_entree)} ---")
+        if _stop():
+            return
         time.sleep(delai_initial)
 
         temps_prec = 0.0
         try:
             for a in self.actions:
+                if _stop():
+                    print("Lecture interrompue (stop_event).")
+                    break
+
                 attente = (a["temps"] - temps_prec) / vitesse
                 if attente > 0:
-                    time.sleep(attente)
+                    # Attente interruptible : un stop_event coupe sans délai,
+                    # même au milieu d'une longue pause de la macro.
+                    if stop_event is not None:
+                        if stop_event.wait(attente):
+                            print("Lecture interrompue (stop_event).")
+                            break
+                    else:
+                        time.sleep(attente)
 
                 t = a["type"]
                 if t in ("mouvement_souris", "position_initiale"):

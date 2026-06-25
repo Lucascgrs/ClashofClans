@@ -1175,7 +1175,8 @@ def save_clan_war_to_excel(data: dict, filename: str, clan_tag: str):
 
 def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
            inviting: bool = True, condition: bool = True,
-           searching_players: bool = True, progress_callback=None):
+           searching_players: bool = True, progress_callback=None,
+           stop_event=None):
     """
     Pipeline recherche aléatoire + invitation.
 
@@ -1185,12 +1186,20 @@ def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
       - inviting                     : lancer l'invitation automatique
       - condition                    : appliquer filter_player (TH16+, classé, actif)
       - searching_players            : effectuer la phase de recherche aléatoire
+      - stop_event                   : threading.Event optionnel ; si set, arrêt
+                                       coopératif aux bornes de boucle.
     """
+    def _stop() -> bool:
+        return stop_event is not None and stop_event.is_set()
+
     with Timer("invite total"):
         clan_tags = []
         if searching_players:
             with Timer("recherche aléatoire de clans"):
                 for i in tqdm(range(different_name), desc="Génération préfixes aléatoires"):
+                    if _stop():
+                        logging.info("Invitation interrompue (stop_event).")
+                        return
                     clan_tags.extend(random_clan_search(nb_of_clan_with_the_same_name))
                     if progress_callback:
                         # Progression 0 -> 80% pour la recherche
@@ -1212,11 +1221,14 @@ def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
             if progress_callback:
                 progress_callback(90, 100)
 
-        if inviting:
+        if inviting and not _stop():
             tags = read_tags_from_txt()
             logging.info(f"{len(tags)} joueurs à inviter...")
             total_inv = len(tags)
             for i, tag in enumerate(tqdm(tags.copy(), desc="Invitations", unit="inv")):
+                if _stop():
+                    logging.info("Invitation interrompue (stop_event).")
+                    return
                 automate_coc_input(tag)
                 tags.remove(tag)
                 save_tags_to_txt(tags)

@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import threading
 import os
 import json
@@ -12,6 +12,7 @@ import RegisterActions
 import playback
 import walls
 import attack_session
+import orchestration
 
 
 DEFAULT_ACCOUNT = {
@@ -47,6 +48,11 @@ class CLASH_GUI(tk.Tk):
         lbl_title = ttk.Label(self, text="Clash of Clans Automation Dashboard", font=("Helvetica", 18, "bold"))
         lbl_title.pack(pady=10)
 
+        # Threads d'automatisation suivis (pour l'arrêt d'urgence global)
+        self._automation_threads = set()
+        self._automation_stop_events = set()
+        self._hotkey_listener = None
+
         # Onglets
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill='both', expand=True, padx=10, pady=5)
@@ -54,12 +60,20 @@ class CLASH_GUI(tk.Tk):
         self.create_scan_tab()
         self.create_game_tab()
         self.create_walls_tab()
+        self.create_orchestration_tab()
         self.create_data_tab()
         self.create_tags_tab()
         self.create_logs_tab()
 
         self.walls_stop_event = threading.Event()
         self.walls_thread = None
+
+        # Raccourci global d'arrêt d'urgence
+        self.stop_hotkey = orchestration.load_settings().get(
+            "stop_hotkey", orchestration.DEFAULT_STOP_HOTKEY)
+        if hasattr(self, "var_stop_hotkey"):
+            self.var_stop_hotkey.set(self.stop_hotkey)
+        self._start_hotkey_listener()
 
     def _make_scrollable_tab(self, title):
         """Crée un onglet dont le contenu est scrollable verticalement.
@@ -216,6 +230,23 @@ class CLASH_GUI(tk.Tk):
 
         ttk.Button(frame, text="⚙️ Configurer Coordonnées & Souris", command=self.configure_coords_window).pack(pady=5)
 
+        # --- Export pour l'orchestration ---
+        ttk.Separator(frame, orient="horizontal").pack(fill="x", pady=8)
+        lf_orch = ttk.LabelFrame(frame, text="Orchestration")
+        lf_orch.pack(fill="x", padx=10, pady=5)
+        self.var_invite_orch_mode = tk.StringVar(value="aleatoire")
+        f_mode = ttk.Frame(lf_orch)
+        f_mode.pack(fill="x", padx=5, pady=3)
+        ttk.Label(f_mode, text="Mode enregistré :").pack(side="left", padx=2)
+        ttk.Radiobutton(f_mode, text="Aléatoire", value="aleatoire",
+                        variable=self.var_invite_orch_mode).pack(side="left", padx=2)
+        ttk.Radiobutton(f_mode, text="Incrémental", value="incremental",
+                        variable=self.var_invite_orch_mode).pack(side="left", padx=2)
+        ttk.Radiobutton(f_mode, text="Les deux", value="les_deux",
+                        variable=self.var_invite_orch_mode).pack(side="left", padx=2)
+        ttk.Button(lf_orch, text="💾 Enregistrer configuration pour orchestration",
+                   command=self.save_invite_orchestration_config).pack(fill="x", padx=5, pady=5)
+
     def create_tags_tab(self):
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="📝 Tags Joueurs")
@@ -327,7 +358,10 @@ class CLASH_GUI(tk.Tk):
         ttk.Label(f_walls_ritual, text="attaques (défaites + jour + nuit)").pack(side="left", padx=5)
 
         ttk.Button(lf_atk, text="⚔ LANCER SESSION D'ATTAQUE", command=self.run_auto_attack).pack(fill="x", padx=5, pady=10)
-        
+
+        ttk.Button(lf_atk, text="💾 Enregistrer configuration pour orchestration",
+                   command=self.save_attack_orchestration_config).pack(fill="x", padx=5, pady=(0, 10))
+
         # Initialiser la liste et les combobox une fois que tout est créé
         self.refresh_action_files()
 
@@ -924,7 +958,7 @@ class CLASH_GUI(tk.Tk):
             except Exception as e:
                 self.log(f"Erreur Scan: {e}")
 
-        threading.Thread(target=task).start()
+        self._spawn_automation(task, name="scan_joueurs")
 
 
     def run_clan_scan(self):
@@ -952,7 +986,7 @@ class CLASH_GUI(tk.Tk):
             except Exception as e:
                 self.log(f"Erreur Scan: {e}")
 
-        threading.Thread(target=task).start()
+        self._spawn_automation(task, name="scan_clans")
         
     def run_random_invite(self):
         self.update_coc_config()
@@ -961,7 +995,8 @@ class CLASH_GUI(tk.Tk):
         do_search = self.vars["rand_do_search"].get()
         do_invite = self.vars["rand_do_invite"].get()
         self.progress_var.set(0)
-        
+        stop_event = threading.Event()
+
         def task():
             self.log(f"Démarrage Invite Aléatoire (Names={diff_names}, Clans/Name={clans_per_name})...")
             try:
@@ -971,14 +1006,15 @@ class CLASH_GUI(tk.Tk):
                     inviting=do_invite,
                     condition=True, # Applique les filtres de FILTER_CONFIG
                     searching_players=do_search,
-                    progress_callback=self.update_progress
+                    progress_callback=self.update_progress,
+                    stop_event=stop_event,
                 )
                 self.log("Procédure terminée.")
                 self.progress_var.set(100)
             except Exception as e:
                 self.log(f"Erreur Invite: {e}")
-        
-        threading.Thread(target=task).start()
+
+        self._spawn_automation(task, name="invitation", stop_event=stop_event)
 
     def update_locations(self):
         def task():
@@ -1046,8 +1082,11 @@ class CLASH_GUI(tk.Tk):
         fname = self.lst_actions.get(sel[0])
         self.log(f"Lecture action : {fname}")
         
-        # Exécuter dans un thread pour ne pas figer l'interface
-        threading.Thread(target=lambda: playback.LecteurPosition(fichier_entree=fname).rejouer()).start()
+        # Exécuter dans un thread suivi (tuable par l'arrêt d'urgence)
+        stop_event = threading.Event()
+        self._spawn_automation(
+            lambda: playback.LecteurPosition(fichier_entree=fname).rejouer(stop_event=stop_event),
+            name=f"playback:{fname}", stop_event=stop_event)
 
     def run_auto_attack(self):
         selected_indices = self.lb_accounts.curselection()
@@ -1069,6 +1108,7 @@ class CLASH_GUI(tk.Tk):
 
         walls_every = (int(self.var_walls_ritual_every.get())
                        if self.var_walls_ritual_enabled.get() else 0)
+        stop_event = threading.Event()
 
         def task():
             self.log("Démarrage de la session d'attaques…")
@@ -1085,11 +1125,569 @@ class CLASH_GUI(tk.Tk):
                     walls_every=walls_every,
                     log_callback=self.log,
                     walls_log_callback=self.log,
+                    stop_event=stop_event,
                 )
             except Exception as e:
                 self.log(f"Erreur Attaques : {e}")
 
-        threading.Thread(target=task, daemon=True).start()
+        self._spawn_automation(task, name="attaque", stop_event=stop_event)
+
+    # ====================================================================
+    # ORCHESTRATION — export des configurations
+    # ====================================================================
+
+    def _ask_config_name(self, default):
+        name = simpledialog.askstring(
+            "Nom de la configuration",
+            "Nom du fichier de configuration (sans .json) :",
+            initialvalue=default, parent=self)
+        if name is None:
+            return None
+        name = name.strip()
+        return name or default
+
+    def save_invite_orchestration_config(self):
+        # Pays sélectionnés -> location_ids
+        selected_names = [self.lb_countries.get(i) for i in self.lb_countries.curselection()]
+        selected_ids = [COC.LOCATIONS_DICT[c] for c in selected_names if c in COC.LOCATIONS_DICT]
+        if not selected_ids:
+            selected_ids = [32000087]  # France par défaut
+
+        cfg = {
+            "type": orchestration.TASK_INVITE,
+            "name": "",  # rempli ci-dessous
+            "mode": self.var_invite_orch_mode.get(),
+            "filters": {
+                "min_townhall":     self.vars["min_townhall"].get(),
+                "min_xp":           self.vars["min_xp"].get(),
+                "min_trophies":     self.vars["min_trophies"].get(),
+                "min_donations":    self.vars["min_donations"].get(),
+                "exclude_unranked": self.vars["exclude_unranked"].get(),
+                "require_activity": self.vars["require_activity"].get(),
+            },
+            "location_ids":                  selected_ids,
+            "different_name":                self.vars["rand_diff_names"].get(),
+            "nb_of_clan_with_the_same_name": self.vars["rand_clans_per_name"].get(),
+            "do_search":                     self.vars["rand_do_search"].get(),
+            "do_invite":                     self.vars["rand_do_invite"].get(),
+            "scan_limit_players":            self.vars["scan_limit_players"].get(),
+        }
+
+        name = self._ask_config_name(f"invite_{cfg['mode']}")
+        if not name:
+            return
+        cfg["name"] = name
+        try:
+            path = orchestration.save_config(cfg, name)
+            self.log(f"Config invitation enregistrée : {path}")
+            messagebox.showinfo("Orchestration", f"Configuration enregistrée :\n{path}")
+            self._refresh_orch_configs()
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def save_attack_orchestration_config(self):
+        selected_indices = self.lb_accounts.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Attention", "Aucun compte sélectionné !")
+            return
+        accounts = [dict(self.accounts[idx]) for idx in selected_indices]
+
+        strat = self.var_strat_main.get()
+        if not strat:
+            messagebox.showwarning("Attention", "Veuillez choisir une stratégie principale.")
+            return
+
+        walls_every = (int(self.var_walls_ritual_every.get())
+                       if self.var_walls_ritual_enabled.get() else 0)
+
+        cfg = {
+            "type": orchestration.TASK_ATTACK,
+            "name": "",
+            "accounts":            accounts,
+            "defaites":            self.var_nb_lose.get(),
+            "attaques":            self.var_nb_atk.get(),
+            "attaques_night":      self.var_nb_night.get(),
+            "strategy_file":       strat,
+            "night_strategy_file": self.var_strat_night.get(),
+            "walls_every":         walls_every,
+        }
+
+        name = self._ask_config_name("attaque")
+        if not name:
+            return
+        cfg["name"] = name
+        try:
+            path = orchestration.save_config(cfg, name)
+            self.log(f"Config attaque enregistrée : {path}")
+            messagebox.showinfo("Orchestration", f"Configuration enregistrée :\n{path}")
+            self._refresh_orch_configs()
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    # ====================================================================
+    # ORCHESTRATION — onglet
+    # ====================================================================
+
+    def create_orchestration_tab(self):
+        frame = self._make_scrollable_tab("🗂 Orchestration")
+
+        self.orchestrator = orchestration.Orchestrator(
+            log_callback=self._orch_log,
+            status_callback=self._orch_status,
+        )
+        # tâches de la pile, alignées sur les lignes du Treeview (iid = index str)
+        self._orch_items = []
+
+        # --- Zone haute : configs disponibles | boutons | pile ---
+        top = ttk.Frame(frame)
+        top.pack(fill="both", expand=True, padx=10, pady=8)
+
+        # Colonne gauche : configs disponibles
+        left = ttk.LabelFrame(top, text="Configurations disponibles")
+        left.pack(side="left", fill="both", expand=True)
+        self.lb_orch_configs = tk.Listbox(left, height=12, exportselection=False)
+        self.lb_orch_configs.pack(fill="both", expand=True, padx=5, pady=5)
+        self.lb_orch_configs.bind("<Double-Button-1>", lambda e: self._orch_add_selected())
+        ttk.Button(left, text="🔄 Rafraîchir",
+                   command=self._refresh_orch_configs).pack(fill="x", padx=5, pady=(0, 5))
+
+        # Colonne centrale : boutons
+        mid = ttk.Frame(top)
+        mid.pack(side="left", fill="y", padx=8)
+        ttk.Label(mid, text="").pack(pady=10)
+        ttk.Button(mid, text="Ajouter ▶", command=self._orch_add_selected).pack(fill="x", pady=3)
+        ttk.Button(mid, text="◀ Retirer", command=self._orch_remove_selected).pack(fill="x", pady=3)
+        ttk.Separator(mid, orient="horizontal").pack(fill="x", pady=6)
+        ttk.Button(mid, text="▲ Monter", command=lambda: self._orch_move(-1)).pack(fill="x", pady=3)
+        ttk.Button(mid, text="▼ Descendre", command=lambda: self._orch_move(1)).pack(fill="x", pady=3)
+
+        # Colonne droite : pile d'exécution
+        right = ttk.LabelFrame(top, text="Pile d'exécution")
+        right.pack(side="left", fill="both", expand=True)
+        cols = ("type", "nom", "heure", "preempt")
+        self.tv_orch = ttk.Treeview(right, columns=cols, show="headings", height=12)
+        self.tv_orch.heading("type", text="Type")
+        self.tv_orch.heading("nom", text="Nom")
+        self.tv_orch.heading("heure", text="Heure")
+        self.tv_orch.heading("preempt", text="Prendre le dessus")
+        self.tv_orch.column("type", width=50, anchor="center")
+        self.tv_orch.column("nom", width=160)
+        self.tv_orch.column("heure", width=60, anchor="center")
+        self.tv_orch.column("preempt", width=110, anchor="center")
+        self.tv_orch.pack(fill="both", expand=True, padx=5, pady=5)
+        self.tv_orch.bind("<Double-Button-1>", lambda e: self._orch_edit_schedule())
+
+        # --- Mode d'exécution ---
+        lf_mode = ttk.LabelFrame(frame, text="Mode d'exécution")
+        lf_mode.pack(fill="x", padx=10, pady=5)
+        self.var_orch_mode = tk.StringVar(value="chain")
+        f_m = ttk.Frame(lf_mode)
+        f_m.pack(fill="x", padx=5, pady=4)
+        ttk.Radiobutton(f_m, text="Enchaînement (chaque tâche après la précédente)",
+                        value="chain", variable=self.var_orch_mode,
+                        command=self._orch_update_mode_ui).pack(anchor="w")
+        ttk.Radiobutton(f_m, text="Programmation horaire (heure précise par tâche)",
+                        value="schedule", variable=self.var_orch_mode,
+                        command=self._orch_update_mode_ui).pack(anchor="w")
+
+        self.var_orch_loop = tk.BooleanVar(value=False)
+        self.chk_orch_loop = ttk.Checkbutton(
+            lf_mode, text="Boucler la pile (mode enchaînement)",
+            variable=self.var_orch_loop)
+        self.chk_orch_loop.pack(anchor="w", padx=5, pady=2)
+
+        self.lbl_orch_mode_hint = ttk.Label(
+            lf_mode, foreground="gray", justify="left",
+            text="Mode horaire : double-cliquez une ligne de la pile pour définir "
+                 "l'heure (HH:MM) et l'option « prendre le dessus ».")
+        self.lbl_orch_mode_hint.pack(anchor="w", padx=5, pady=2)
+
+        # --- Contrôles ---
+        lf_ctrl = ttk.LabelFrame(frame, text="Contrôle")
+        lf_ctrl.pack(fill="x", padx=10, pady=5)
+        f_c = ttk.Frame(lf_ctrl)
+        f_c.pack(fill="x", padx=5, pady=5)
+        ttk.Button(f_c, text="▶ Démarrer orchestration",
+                   command=self.start_orchestration).pack(side="left", padx=5)
+        ttk.Button(f_c, text="🛑 Stop",
+                   command=self.stop_orchestration).pack(side="left", padx=5)
+        ttk.Separator(f_c, orient="vertical").pack(side="left", fill="y", padx=10)
+        ttk.Button(f_c, text="💾 Enregistrer la pile",
+                   command=self.save_orch_stack).pack(side="left", padx=5)
+        ttk.Button(f_c, text="📂 Charger la pile",
+                   command=self.load_orch_stack).pack(side="left", padx=5)
+        self.lbl_orch_status = ttk.Label(lf_ctrl, text="Aucune tâche en cours",
+                                         foreground="blue")
+        self.lbl_orch_status.pack(anchor="w", padx=5, pady=2)
+
+        # --- Arrêt d'urgence ---
+        lf_emerg = ttk.LabelFrame(frame, text="🚨 Arrêt d'urgence (coupure immédiate)")
+        lf_emerg.pack(fill="x", padx=10, pady=5)
+
+        f_panic = ttk.Frame(lf_emerg)
+        f_panic.pack(fill="x", padx=5, pady=5)
+        style = ttk.Style()
+        try:
+            style.configure("Emerg.TButton", foreground="white", background="#c0392b")
+        except Exception:
+            pass
+        ttk.Button(f_panic, text="⛔ TOUT ARRÊTER MAINTENANT",
+                   style="Emerg.TButton",
+                   command=self.emergency_stop_all).pack(side="left", padx=5, ipady=4)
+
+        f_key = ttk.Frame(lf_emerg)
+        f_key.pack(fill="x", padx=5, pady=5)
+        ttk.Label(f_key, text="Raccourci clavier global :").pack(side="left", padx=2)
+        self.var_stop_hotkey = tk.StringVar(
+            value=getattr(self, "stop_hotkey", orchestration.DEFAULT_STOP_HOTKEY))
+        ttk.Entry(f_key, textvariable=self.var_stop_hotkey, width=20).pack(side="left", padx=4)
+        ttk.Button(f_key, text="Appliquer",
+                   command=self._apply_stop_hotkey).pack(side="left", padx=4)
+
+        ttk.Label(lf_emerg, foreground="gray", justify="left",
+                  text="Le raccourci fonctionne même quand la souris est pilotée par "
+                       "le bot.\nFormat pynput : touche unique « <f12> » ou combinaison "
+                       "« <ctrl>+<shift>+s ».\nLa coupure est immédiate : elle n'attend "
+                       "pas la fin de l'automatisation en cours."
+                  ).pack(anchor="w", padx=5, pady=2)
+
+        # --- Journal ---
+        lf_log = ttk.LabelFrame(frame, text="Journal d'orchestration")
+        lf_log.pack(fill="both", expand=True, padx=10, pady=8)
+        self.txt_orch_log = tk.Text(lf_log, height=12, state="disabled")
+        self.txt_orch_log.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self._refresh_orch_configs()
+        self._orch_update_mode_ui()
+
+    # ----- helpers UI orchestration -----
+
+    def _orch_log(self, msg):
+        def append():
+            self.txt_orch_log.config(state="normal")
+            self.txt_orch_log.insert("end", str(msg) + "\n")
+            self.txt_orch_log.see("end")
+            self.txt_orch_log.config(state="disabled")
+        self.after(0, append)
+        print(msg)
+
+    def _orch_status(self, text):
+        self.after(0, lambda: self.lbl_orch_status.config(text=text))
+
+    def _refresh_orch_configs(self):
+        if not hasattr(self, "lb_orch_configs"):
+            return
+        self.lb_orch_configs.delete(0, "end")
+        self._orch_available = []
+        # Configs invite / attaque
+        for cfg in orchestration.list_config_files():
+            icon = orchestration.TYPE_ICONS.get(cfg["type"], "?")
+            self.lb_orch_configs.insert("end", f"{icon}  {cfg['name']}  [{cfg['type']}]")
+            self._orch_available.append({
+                "type": cfg["type"], "label": cfg["name"], "source_path": cfg["path"],
+            })
+        # Macros Actions/*.json (rejeu)
+        for fname in orchestration.list_action_files():
+            icon = orchestration.TYPE_ICONS[orchestration.TASK_PLAYBACK]
+            self.lb_orch_configs.insert("end", f"{icon}  {fname}  [playback]")
+            self._orch_available.append({
+                "type": orchestration.TASK_PLAYBACK,
+                "label": fname, "file": fname,
+            })
+
+    def _orch_redraw_stack(self):
+        self.tv_orch.delete(*self.tv_orch.get_children())
+        for i, item in enumerate(self._orch_items):
+            icon = orchestration.TYPE_ICONS.get(item["type"], "?")
+            preempt = "Oui" if item.get("preempt") else "Non"
+            self.tv_orch.insert(
+                "", "end", iid=str(i),
+                values=(icon, item.get("label", ""),
+                        item.get("time", ""), preempt))
+
+    def _orch_add_selected(self):
+        sel = self.lb_orch_configs.curselection()
+        if not sel:
+            return
+        src = self._orch_available[sel[0]]
+        item = dict(src)
+        item.setdefault("time", "")
+        item.setdefault("preempt", False)
+        self._orch_items.append(item)
+        self._orch_redraw_stack()
+
+    def _orch_remove_selected(self):
+        sel = self.tv_orch.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        del self._orch_items[idx]
+        self._orch_redraw_stack()
+
+    def _orch_move(self, delta):
+        sel = self.tv_orch.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        new = idx + delta
+        if new < 0 or new >= len(self._orch_items):
+            return
+        self._orch_items[idx], self._orch_items[new] = \
+            self._orch_items[new], self._orch_items[idx]
+        self._orch_redraw_stack()
+        self.tv_orch.selection_set(str(new))
+
+    def _orch_edit_schedule(self):
+        if self.var_orch_mode.get() != "schedule":
+            messagebox.showinfo(
+                "Mode horaire",
+                "Passez en mode « Programmation horaire » pour définir une heure.")
+            return
+        sel = self.tv_orch.selection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        item = self._orch_items[idx]
+
+        win = tk.Toplevel(self)
+        win.title("Planification de la tâche")
+        win.geometry("320x180")
+        win.transient(self)
+        win.grab_set()
+
+        v_time = tk.StringVar(value=item.get("time", ""))
+        v_preempt = tk.BooleanVar(value=bool(item.get("preempt", False)))
+
+        grid = ttk.Frame(win)
+        grid.pack(fill="both", expand=True, padx=12, pady=12)
+        ttk.Label(grid, text=item.get("label", "")).grid(row=0, column=0, columnspan=2,
+                                                          sticky="w", pady=(0, 8))
+        ttk.Label(grid, text="Heure (HH:MM) :").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(grid, textvariable=v_time, width=10).grid(row=1, column=1, sticky="w")
+        ttk.Checkbutton(grid, text="Prendre le dessus si une tâche est en cours",
+                        variable=v_preempt).grid(row=2, column=0, columnspan=2,
+                                                 sticky="w", pady=6)
+
+        def save_and_close():
+            t = v_time.get().strip()
+            if t:
+                try:
+                    hh, mm = t.split(":")
+                    hh, mm = int(hh), int(mm)
+                    if not (0 <= hh < 24 and 0 <= mm < 60):
+                        raise ValueError
+                    t = f"{hh:02d}:{mm:02d}"
+                except Exception:
+                    messagebox.showwarning("Format", "Heure invalide (attendu HH:MM).",
+                                           parent=win)
+                    return
+            item["time"] = t
+            item["preempt"] = bool(v_preempt.get())
+            self._orch_redraw_stack()
+            self.tv_orch.selection_set(str(idx))
+            win.destroy()
+
+        bar = ttk.Frame(win)
+        bar.pack(fill="x", padx=12, pady=8)
+        ttk.Button(bar, text="Enregistrer", command=save_and_close).pack(side="right")
+        ttk.Button(bar, text="Annuler", command=win.destroy).pack(side="right", padx=6)
+
+    def _orch_update_mode_ui(self):
+        schedule = self.var_orch_mode.get() == "schedule"
+        # Colonnes heure / preempt seulement pertinentes en mode horaire
+        if schedule:
+            self.tv_orch.configure(displaycolumns=("type", "nom", "heure", "preempt"))
+            self.chk_orch_loop.state(["disabled"])
+        else:
+            self.tv_orch.configure(displaycolumns=("type", "nom"))
+            self.chk_orch_loop.state(["!disabled"])
+
+    # ----- contrôle moteur -----
+
+    def start_orchestration(self):
+        if self.orchestrator.is_running():
+            messagebox.showinfo("Orchestration", "Une orchestration est déjà en cours.")
+            return
+        if not self._orch_items:
+            messagebox.showwarning("Orchestration", "La pile est vide.")
+            return
+
+        mode = self.var_orch_mode.get()
+        if mode == "schedule":
+            sans_heure = [it.get("label", "?") for it in self._orch_items
+                          if not it.get("time")]
+            if sans_heure:
+                messagebox.showwarning(
+                    "Orchestration",
+                    "Tâches sans heure en mode horaire :\n- " + "\n- ".join(sans_heure))
+                return
+
+        items = [dict(it) for it in self._orch_items]
+        self.orchestrator.start(items, mode=mode,
+                                loop=self.var_orch_loop.get())
+
+    def stop_orchestration(self):
+        self.orchestrator.stop()
+
+    # ====================================================================
+    # ARRÊT D'URGENCE GLOBAL (raccourci clavier + bouton)
+    # ====================================================================
+
+    def _spawn_automation(self, target, name="auto", stop_event=None):
+        """Lance une automatisation dans un thread suivi, tuable par l'arrêt
+        d'urgence. Si `stop_event` est fourni, il est posé en priorité lors de
+        l'arrêt d'urgence (coupure coopérative immédiate via waits interruptibles)
+        avant le kill forcé du thread. Retourne le thread."""
+        if stop_event is not None:
+            self._automation_stop_events.add(stop_event)
+
+        def wrapped():
+            try:
+                target()
+            except orchestration.EmergencyStop:
+                print(f"[{name}] interrompu (arrêt d'urgence).")
+            finally:
+                self._automation_threads.discard(threading.current_thread())
+                if stop_event is not None:
+                    self._automation_stop_events.discard(stop_event)
+        t = threading.Thread(target=wrapped, daemon=True, name=name)
+        self._automation_threads.add(t)
+        t.start()
+        return t
+
+    def emergency_stop_all(self):
+        """Coupe IMMÉDIATEMENT toute exécution en cours (sans attendre la fin) :
+        orchestration, remparts, et toutes les automatisations manuelles."""
+        msg = "⛔ ARRÊT D'URGENCE — coupure immédiate de toutes les automatisations."
+        if hasattr(self, "txt_orch_log"):
+            self._orch_log(msg)
+        self.after(0, lambda: self.log(msg))
+
+        # Remparts
+        try:
+            self.walls_stop_event.set()
+        except Exception:
+            pass
+        wt = getattr(self, "walls_thread", None)
+        if wt is not None and wt.is_alive():
+            orchestration.async_raise(wt, orchestration.EmergencyStop)
+
+        # Orchestrateur (pose les drapeaux + force la mort du worker)
+        if hasattr(self, "orchestrator") and self.orchestrator.is_running():
+            try:
+                self.orchestrator.emergency_stop()
+            except Exception:
+                pass
+
+        # Coupure coopérative immédiate (waits interruptibles) des manuelles
+        for ev in list(self._automation_stop_events):
+            try:
+                ev.set()
+            except Exception:
+                pass
+
+        # Puis kill forcé des threads d'automatisation encore vivants
+        for t in list(self._automation_threads):
+            if t.is_alive():
+                orchestration.async_raise(t, orchestration.EmergencyStop)
+
+        # État propre des périphériques (relâche boutons/modificateurs)
+        orchestration.release_input_devices()
+
+        self.after(0, self._update_emergency_status)
+
+    def _update_emergency_status(self):
+        if hasattr(self, "lbl_orch_status"):
+            self.lbl_orch_status.config(text="⛔ Arrêt d'urgence déclenché")
+
+    def _on_emergency_hotkey(self):
+        # Appelé depuis le thread du listener pynput → pas de Tk direct ici.
+        try:
+            self.emergency_stop_all()
+        except Exception as e:
+            print(f"Erreur arrêt d'urgence : {e}")
+
+    def _start_hotkey_listener(self):
+        # Stoppe un éventuel listener précédent
+        if getattr(self, "_hotkey_listener", None) is not None:
+            try:
+                self._hotkey_listener.stop()
+            except Exception:
+                pass
+            self._hotkey_listener = None
+
+        combo = (self.stop_hotkey or orchestration.DEFAULT_STOP_HOTKEY).strip()
+        try:
+            keyboard.HotKey.parse(combo)  # valide le format pynput
+            self._hotkey_listener = keyboard.GlobalHotKeys(
+                {combo: self._on_emergency_hotkey})
+            self._hotkey_listener.start()
+            self.log(f"Raccourci d'arrêt d'urgence actif : {combo}")
+        except Exception as e:
+            self._hotkey_listener = None
+            self.log(f"⚠ Raccourci invalide « {combo} » ({e}) — "
+                     f"arrêt d'urgence clavier désactivé.")
+
+    def _apply_stop_hotkey(self):
+        new = self.var_stop_hotkey.get().strip()
+        if not new:
+            messagebox.showwarning("Raccourci", "Saisissez un raccourci (ex. <f12>).")
+            return
+        try:
+            keyboard.HotKey.parse(new)
+        except Exception as e:
+            messagebox.showerror(
+                "Raccourci invalide",
+                f"Format pynput attendu, ex. <f12> ou <ctrl>+<shift>+s.\n\n{e}")
+            return
+        self.stop_hotkey = new
+        settings = orchestration.load_settings()
+        settings["stop_hotkey"] = new
+        orchestration.save_settings(settings)
+        self._start_hotkey_listener()
+        messagebox.showinfo("Raccourci", f"Raccourci d'arrêt d'urgence : {new}")
+
+    def save_orch_stack(self):
+        if not self._orch_items:
+            messagebox.showinfo("Orchestration", "La pile est vide.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Enregistrer la pile",
+            initialdir=orchestration.ensure_orchestration_dir(),
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        stack = {
+            "mode": self.var_orch_mode.get(),
+            "loop": self.var_orch_loop.get(),
+            "items": self._orch_items,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(stack, f, indent=4, ensure_ascii=False)
+            self.log(f"Pile d'orchestration enregistrée : {path}")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def load_orch_stack(self):
+        path = filedialog.askopenfilename(
+            title="Charger la pile",
+            initialdir=orchestration.ensure_orchestration_dir(),
+            filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                stack = json.load(f)
+            self._orch_items = list(stack.get("items", []))
+            self.var_orch_mode.set(stack.get("mode", "chain"))
+            self.var_orch_loop.set(bool(stack.get("loop", False)))
+            self._orch_redraw_stack()
+            self._orch_update_mode_ui()
+            self.log(f"Pile d'orchestration chargée : {path}")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
 
     def load_parquet(self, filename):
         full_path = os.path.join(os.path.dirname(__file__), filename)

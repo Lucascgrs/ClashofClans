@@ -121,6 +121,13 @@ def run_attack_session(
     def _stop() -> bool:
         return stop_event is not None and stop_event.is_set()
 
+    def _isleep(seconds) -> None:
+        """Pause interruptible : un stop_event coupe l'attente sans délai."""
+        if stop_event is not None:
+            stop_event.wait(seconds)
+        else:
+            time.sleep(seconds)
+
     def _maybe_walls() -> None:
         if walls_every <= 0:
             return
@@ -128,7 +135,7 @@ def run_attack_session(
         if counter["n"] >= walls_every:
             counter["n"] = 0
             log(f"--- Rituel remparts (toutes les {walls_every} attaques) ---")
-            time.sleep(delays.get("before_walls_ritual", 1.5))
+            _isleep(delays.get("before_walls_ritual", 1.5))
             try:
                 WallsUpgrader(log_callback=walls_log_callback or log).run()
             except Exception as e:
@@ -146,14 +153,14 @@ def run_attack_session(
 
         log(f"=== Compte : {name} ({switch_file}) ===")
         _play(switch_file)
-        time.sleep(delays["after_switch"])
+        _isleep(delays["after_switch"])
         _play(neutral)
 
         # Armée principale
         first_army = acc.get("first_army_file") or actions.get("default_first_army")
         if _play(first_army):
             _play(neutral)
-            time.sleep(delays["after_army_select"])
+            _isleep(delays["after_army_select"])
 
         # Phase défaites
         lose_file = actions.get("lose")
@@ -163,7 +170,7 @@ def run_attack_session(
                 if _stop():
                     return
                 _play(lose_file)
-                time.sleep(delays["after_attack"])
+                _isleep(delays["after_attack"])
                 _play(neutral)
                 _maybe_walls()
 
@@ -174,7 +181,7 @@ def run_attack_session(
                 if _stop():
                     return
                 _play(strategy_file)
-                time.sleep(delays["after_attack"])
+                _isleep(delays["after_attack"])
                 _play(neutral)
                 _maybe_walls()
 
@@ -182,24 +189,24 @@ def run_attack_session(
         if acc.get("switch_army"):
             second_army = acc.get("second_army_file") or actions.get("default_second_army")
             if _play(second_army):
-                time.sleep(delays["after_army_select"])
+                _isleep(delays["after_army_select"])
 
         # Phase attaques nuit
         if attaques_night > 0 and night_strategy_file:
             log(f"[{name}] {attaques_night} attaque(s) nuit avec {night_strategy_file}…")
             if _play(actions.get("night_boat")):
-                time.sleep(delays["after_night_boat"])
+                _isleep(delays["after_night_boat"])
             for _ in range(attaques_night):
                 if _stop():
                     return
                 _play(night_strategy_file)
-                time.sleep(delays["after_night_attack"])
+                _isleep(delays["after_night_attack"])
                 _play(neutral)
-                time.sleep(delays["after_night_attack"])
+                _isleep(delays["after_night_attack"])
                 _play(actions.get("night_elexir"))  # facultatif
                 _maybe_walls()
-            time.sleep(delays.get("before_normal_boat", 2.0))
+            _isleep(delays.get("before_normal_boat", 2.0))
             if _play(actions.get("normal_boat")):
-                time.sleep(delays.get("after_normal_boat", 3.0))
+                _isleep(delays.get("after_normal_boat", 3.0))
 
     log("=== Session d'attaques terminée ===")
