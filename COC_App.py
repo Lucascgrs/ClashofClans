@@ -11,6 +11,8 @@ import COC
 import RegisterActions
 import playback
 import walls
+import upgrades
+import multi_account
 import attack_session
 import orchestration
 
@@ -60,6 +62,8 @@ class CLASH_GUI(tk.Tk):
         self.create_scan_tab()
         self.create_game_tab()
         self.create_walls_tab()
+        self.create_upgrades_tab()
+        self.create_multi_tab()
         self.create_orchestration_tab()
         self.create_data_tab()
         self.create_tags_tab()
@@ -67,6 +71,8 @@ class CLASH_GUI(tk.Tk):
 
         self.walls_stop_event = threading.Event()
         self.walls_thread = None
+        self.upgrades_stop_event = threading.Event()
+        self.upgrades_thread = None
 
         # Raccourci global d'arrêt d'urgence
         self.stop_hotkey = orchestration.load_settings().get(
@@ -288,6 +294,10 @@ class CLASH_GUI(tk.Tk):
         self.var_rec_name = tk.StringVar(value="nouvelle_action.json")
         ttk.Label(lf_rec, text="Nom du fichier:").pack(anchor="w", padx=5)
         ttk.Entry(lf_rec, textvariable=self.var_rec_name).pack(fill="x", padx=5, pady=2)
+        ttk.Label(lf_rec, foreground="gray",
+                  text="Astuce : préfixez d'un sous-dossier pour ranger vos macros,\n"
+                       "ex. attaque/mon_attaque.json, switch/compte2.json, armee/armee1.json"
+                  ).pack(anchor="w", padx=5)
         ttk.Button(lf_rec, text="🔴 Démarrer Enregistrement (ESC pour stopper)", command=self.start_recording).pack(fill="x", padx=5, pady=5)
 
         # --- Attaques Auto ---
@@ -346,16 +356,30 @@ class CLASH_GUI(tk.Tk):
         ttk.Label(grid_atk, text="Nuit:").grid(row=0, column=4)
         ttk.Entry(grid_atk, textvariable=self.var_nb_night, width=5).grid(row=0, column=5)
 
-        # --- Rituel d'amélioration des remparts intercalé ---
+        # --- Rituels intercalés (exclusifs) : remparts OU premiers choix ---
         f_walls_ritual = ttk.Frame(lf_atk)
         f_walls_ritual.pack(fill="x", pady=5)
         self.var_walls_ritual_enabled = tk.BooleanVar(value=False)
         self.var_walls_ritual_every   = tk.IntVar(value=5)
         ttk.Checkbutton(f_walls_ritual,
                         text="Améliorer les remparts toutes les",
-                        variable=self.var_walls_ritual_enabled).pack(side="left", padx=5)
+                        variable=self.var_walls_ritual_enabled,
+                        command=self._on_walls_ritual_toggle).pack(side="left", padx=5)
         ttk.Entry(f_walls_ritual, textvariable=self.var_walls_ritual_every, width=4).pack(side="left")
         ttk.Label(f_walls_ritual, text="attaques (défaites + jour + nuit)").pack(side="left", padx=5)
+
+        f_upg_ritual = ttk.Frame(lf_atk)
+        f_upg_ritual.pack(fill="x", pady=2)
+        self.var_upgrades_ritual_enabled = tk.BooleanVar(value=False)
+        self.var_upgrades_ritual_every   = tk.IntVar(value=5)
+        ttk.Checkbutton(f_upg_ritual,
+                        text="Améliorer les 1ers choix toutes les",
+                        variable=self.var_upgrades_ritual_enabled,
+                        command=self._on_upgrades_ritual_toggle).pack(side="left", padx=5)
+        ttk.Entry(f_upg_ritual, textvariable=self.var_upgrades_ritual_every, width=4).pack(side="left")
+        ttk.Label(f_upg_ritual,
+                  text="attaques (config : onglet ⬆ Auto Améliorations / upgrades_config.json)"
+                  ).pack(side="left", padx=5)
 
         ttk.Button(lf_atk, text="⚔ LANCER SESSION D'ATTAQUE", command=self.run_auto_attack).pack(fill="x", padx=5, pady=10)
 
@@ -364,6 +388,15 @@ class CLASH_GUI(tk.Tk):
 
         # Initialiser la liste et les combobox une fois que tout est créé
         self.refresh_action_files()
+
+    def _on_walls_ritual_toggle(self):
+        """Les deux rituels sont exclusifs : cocher l'un décoche l'autre."""
+        if self.var_walls_ritual_enabled.get():
+            self.var_upgrades_ritual_enabled.set(False)
+
+    def _on_upgrades_ritual_toggle(self):
+        if self.var_upgrades_ritual_enabled.get():
+            self.var_walls_ritual_enabled.set(False)
 
     def create_walls_tab(self):
         frame = self._make_scrollable_tab("🧱 Auto Remparts")
@@ -386,6 +419,7 @@ class CLASH_GUI(tk.Tk):
         self.var_walls_click_dy      = tk.IntVar(value=int(p.get("click_y_offset", 0)))
         self.var_walls_manual_or     = tk.IntVar(value=int(p.get("manual_price_or", 0)))
         self.var_walls_manual_elexir = tk.IntVar(value=int(p.get("manual_price_elexir", 0)))
+        self.var_walls_split_x       = tk.IntVar(value=int(p.get("price_split_x", 0)))
 
         grid_p = ttk.Frame(lf_params)
         grid_p.pack(fill="x", padx=5, pady=5)
@@ -413,13 +447,18 @@ class CLASH_GUI(tk.Tk):
         ttk.Entry(grid_p, textvariable=self.var_walls_manual_or, width=12).grid(row=3, column=1, padx=5)
         ttk.Label(grid_p, text="Prix manuel ELEXIR :").grid(row=3, column=2, sticky="w")
         ttk.Entry(grid_p, textvariable=self.var_walls_manual_elexir, width=12).grid(row=3, column=3, padx=5)
+        ttk.Label(grid_p, text="Séparation X (px) :").grid(row=3, column=4, sticky="w")
+        ttk.Entry(grid_p, textvariable=self.var_walls_split_x, width=6).grid(row=3, column=5, padx=5)
 
         ttk.Label(lf_params,
                   text="• Scroll amount : intensité de chaque scroll (négatif = vers le bas).\n"
                        "• Clic offset X/Y : décalage en px appliqué au point de clic sur la ligne 'Rempart'\n"
                        "  (augmente Y si le clic atteint la ligne du dessous/dessus).\n"
                        "• Prix manuel OR / ELEXIR : si > 0, court-circuite l'OCR du prix.\n"
-                       "  Pratique quand le prix est mal lu — entrez le prix réel d'un rempart.",
+                       "  Pratique quand le prix est mal lu — entrez le prix réel d'un rempart.\n"
+                       "• Séparation X : barre verticale (position écran) séparant les NOMS (gauche)\n"
+                       "  des SYMBOLES + PRIX (droite) dans la liste. 0 = ancien mode (tout mélangé).\n"
+                       "  Se capture aussi via l'assistant (étape 'Séparateur NOM / PRIX').",
                   foreground="gray", justify="left").pack(anchor="w", padx=10, pady=2)
 
         # --- Configuration coordonnées ---
@@ -501,17 +540,34 @@ class CLASH_GUI(tk.Tk):
         cfg["params"]["click_y_offset"]      = int(self.var_walls_click_dy.get())
         cfg["params"]["manual_price_or"]     = int(self.var_walls_manual_or.get())
         cfg["params"]["manual_price_elexir"] = int(self.var_walls_manual_elexir.get())
+        cfg["params"]["price_split_x"]       = int(self.var_walls_split_x.get())
         walls.save_walls_config(cfg)
         self._walls_log("Paramètres sauvegardés.")
         self._refresh_walls_cfg_status()
 
     def configure_walls_wizard(self):
         """Assistant de capture des coordonnées + zones pour l'auto-remparts."""
-        cfg = walls.load_walls_config()
-        steps = walls.WALLS_CONFIG_STEPS
+        def on_save(cfg):
+            walls.save_walls_config(cfg)
+            self._walls_log("Configuration des coordonnées sauvegardée.")
+            self._refresh_walls_cfg_status()
+            # Synchronise le champ 'Séparation X' de l'onglet
+            self.var_walls_split_x.set(int(cfg["params"].get("price_split_x", 0)))
 
+        self._run_config_wizard(
+            title="Configuration — Auto Remparts",
+            cfg=walls.load_walls_config(),
+            steps=walls.WALLS_CONFIG_STEPS,
+            on_save=on_save,
+            log=self._walls_log,
+        )
+
+    def _run_config_wizard(self, *, title, cfg, steps, on_save, log):
+        """Assistant générique de capture de coordonnées.
+        `steps` : liste de (clé dotée, type, titre, description) avec
+        type ∈ {'point', 'zone', 'vline'} ; `on_save(cfg)` est appelé à la fin."""
         win = tk.Toplevel(self)
-        win.title("Configuration — Auto Remparts")
+        win.title(title)
         win.geometry("560x340")
         win.attributes("-topmost", True)
 
@@ -542,12 +598,14 @@ class CLASH_GUI(tk.Tk):
         def render_step():
             if state["step_idx"] >= len(steps):
                 return
-            key, typ, title, desc = steps[state["step_idx"]]
-            lbl_step_title.config(text=title)
+            key, typ, step_title, desc = steps[state["step_idx"]]
+            lbl_step_title.config(text=step_title)
             lbl_step_desc.config(text=desc)
             if typ == "zone":
                 lbl_substep.config(text=("➤ Coin HAUT-GAUCHE" if state["sub_idx"] == 0
                                           else "➤ Coin BAS-DROIT"))
+            elif typ == "vline":
+                lbl_substep.config(text="➤ Barre verticale (seule la position X compte)")
             else:
                 lbl_substep.config(text="➤ Position du bouton")
             lbl_progress.config(text=f"Étape {state['step_idx'] + 1} / {len(steps)}")
@@ -564,23 +622,26 @@ class CLASH_GUI(tk.Tk):
             d.setdefault(section, {})[name] = value
 
         def finalize():
-            walls.save_walls_config(cfg)
-            self._walls_log("Configuration des coordonnées sauvegardée.")
-            self._refresh_walls_cfg_status()
+            on_save(cfg)
 
         def capture_current():
             x, y = mouse_ctrl.position
             x, y = int(x), int(y)
-            key, typ, title, _ = steps[state["step_idx"]]
+            key, typ, step_title, _ = steps[state["step_idx"]]
             if typ == "point":
                 set_nested(cfg, key, {"x": x, "y": y})
-                self._walls_log(f"[{title}] capturé → ({x}, {y})")
+                log(f"[{step_title}] capturé → ({x}, {y})")
+                state["step_idx"] += 1
+                state["sub_idx"] = 0
+            elif typ == "vline":
+                set_nested(cfg, key, x)
+                log(f"[{step_title}] barre verticale → X = {x}")
                 state["step_idx"] += 1
                 state["sub_idx"] = 0
             else:  # zone
                 if state["sub_idx"] == 0:
                     state["current_zone_tl"] = (x, y)
-                    self._walls_log(f"[{title}] coin haut-gauche → ({x}, {y})")
+                    log(f"[{step_title}] coin haut-gauche → ({x}, {y})")
                     state["sub_idx"] = 1
                 else:
                     x1, y1 = state["current_zone_tl"]
@@ -590,7 +651,7 @@ class CLASH_GUI(tk.Tk):
                         "x1": min(x1, x2), "y1": min(y1, y2),
                         "x2": max(x1, x2), "y2": max(y1, y2),
                     })
-                    self._walls_log(f"[{title}] coin bas-droit → ({x2}, {y2})")
+                    log(f"[{step_title}] coin bas-droit → ({x2}, {y2})")
                     state["current_zone_tl"] = None
                     state["step_idx"] += 1
                     state["sub_idx"] = 0
@@ -667,6 +728,617 @@ class CLASH_GUI(tk.Tk):
         else:
             self._walls_log("Aucune session en cours.")
 
+    # ====================================================================
+    # AUTO AMÉLIORATIONS (premier choix de la liste)
+    # ====================================================================
+
+    def create_upgrades_tab(self):
+        frame = self._make_scrollable_tab("⬆ Auto Améliorations")
+
+        cfg = upgrades.load_upgrades_config()
+        p = cfg.get("params", {})
+
+        # --- Types d'améliorations autorisés ---
+        lf_types = ttk.LabelFrame(frame, text="Types d'améliorations autorisés")
+        lf_types.pack(fill="x", padx=10, pady=10)
+
+        self.var_upg_use_or     = tk.BooleanVar(value=bool(p.get("use_or", True)))
+        self.var_upg_use_elexir = tk.BooleanVar(value=bool(p.get("use_elexir", True)))
+        self.var_upg_use_noir   = tk.BooleanVar(value=bool(p.get("use_elexir_noir", True)))
+        self.var_upg_remparts   = tk.BooleanVar(value=bool(p.get("include_remparts", False)))
+
+        f_types = ttk.Frame(lf_types)
+        f_types.pack(fill="x", padx=5, pady=5)
+        ttk.Checkbutton(f_types, text="🟡 Or",
+                        variable=self.var_upg_use_or).pack(side="left", padx=10)
+        ttk.Checkbutton(f_types, text="🟣 Élixir",
+                        variable=self.var_upg_use_elexir).pack(side="left", padx=10)
+        ttk.Checkbutton(f_types, text="⚫ Élixir noir",
+                        variable=self.var_upg_use_noir).pack(side="left", padx=10)
+        ttk.Checkbutton(f_types, text="🧱 Inclure les remparts (processus remparts)",
+                        variable=self.var_upg_remparts).pack(side="left", padx=20)
+
+        # --- Paramètres ---
+        lf_params = ttk.LabelFrame(frame, text="Paramètres")
+        lf_params.pack(fill="x", padx=10, pady=5)
+
+        self.var_upg_keep_workers  = tk.IntVar(value=max(0, int(p.get("keep_workers_free", 0))))
+        self.var_upg_max_upgrades  = tk.IntVar(value=int(p.get("max_upgrades", 10)))
+        self.var_upg_max_scrolls   = tk.IntVar(value=int(p.get("max_scrolls", 8)))
+        self.var_upg_scroll_amount = tk.IntVar(value=int(p.get("scroll_amount", -3)))
+
+        grid_u = ttk.Frame(lf_params)
+        grid_u.pack(fill="x", padx=5, pady=5)
+        ttk.Label(grid_u, text="Ouvriers à laisser libres :").grid(row=0, column=0, sticky="w")
+        tk.Spinbox(grid_u, from_=0, to=10, textvariable=self.var_upg_keep_workers,
+                   width=5).grid(row=0, column=1, padx=5)
+        ttk.Label(grid_u, text="Améliorations max / session :").grid(row=0, column=2, sticky="w", padx=(20, 0))
+        ttk.Entry(grid_u, textvariable=self.var_upg_max_upgrades, width=5).grid(row=0, column=3, padx=5)
+        ttk.Label(grid_u, text="Scrolls max :").grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Entry(grid_u, textvariable=self.var_upg_max_scrolls, width=5).grid(row=1, column=1, padx=5)
+        ttk.Label(grid_u, text="Scroll amount :").grid(row=1, column=2, sticky="w", padx=(20, 0))
+        ttk.Entry(grid_u, textvariable=self.var_upg_scroll_amount, width=5).grid(row=1, column=3, padx=5)
+
+        ttk.Label(lf_params,
+                  text="Choisit la PREMIÈRE amélioration de la liste qui a un prix lisible, dont le type\n"
+                       "de ressource (détecté par la couleur du symbole) est coché et payable, puis :\n"
+                       "clic sur la ligne → 'Améliorer' → 'Confirmer'. Les remparts (si inclus) passent par\n"
+                       "le processus remparts. Zones/scroll/séparateur : configurés dans l'onglet Auto Remparts.",
+                  foreground="gray", justify="left").pack(anchor="w", padx=10, pady=2)
+
+        # --- Configuration coordonnées propres ---
+        lf_cfg = ttk.LabelFrame(frame, text="Configuration des coordonnées (spécifiques)")
+        lf_cfg.pack(fill="x", padx=10, pady=5)
+
+        f_btns = ttk.Frame(lf_cfg)
+        f_btns.pack(fill="x", padx=5, pady=5)
+        ttk.Button(f_btns, text="⚙ Définir zone élixir noir + boutons",
+                   command=self.configure_upgrades_wizard).pack(side="left", padx=5)
+        ttk.Button(f_btns, text="📋 Afficher la config actuelle",
+                   command=self.show_upgrades_config).pack(side="left", padx=5)
+        ttk.Button(f_btns, text="💾 Sauvegarder paramètres",
+                   command=self.save_upgrades_params).pack(side="left", padx=5)
+
+        f_named = ttk.Frame(lf_cfg)
+        f_named.pack(fill="x", padx=5, pady=(0, 5))
+        ttk.Button(f_named, text="💾 Enregistrer config sous…",
+                   command=self.save_upgrades_config_as).pack(side="left", padx=5)
+        ttk.Button(f_named, text="📂 Charger config…",
+                   command=self.load_upgrades_config_from).pack(side="left", padx=5)
+        ttk.Label(f_named, foreground="gray",
+                  text="Configs nommées (Configs/Upgrades) — sélectionnables par compte dans Multi Compte."
+                  ).pack(side="left", padx=10)
+
+        self.lbl_upgrades_cfg_status = ttk.Label(lf_cfg, text="", foreground="gray")
+        self.lbl_upgrades_cfg_status.pack(anchor="w", padx=5)
+        self._refresh_upgrades_cfg_status()
+
+        # --- Actions ---
+        lf_act = ttk.LabelFrame(frame, text="Actions")
+        lf_act.pack(fill="x", padx=10, pady=10)
+
+        f_act = ttk.Frame(lf_act)
+        f_act.pack(fill="x", padx=5, pady=5)
+        ttk.Button(f_act, text="🔍 Tester OCR ressources",
+                   command=self.test_upgrades_ocr).pack(side="left", padx=5)
+        ttk.Button(f_act, text="📃 Tester lecture liste (ouvrez-la d'abord)",
+                   command=self.test_upgrades_rows).pack(side="left", padx=5)
+        ttk.Button(f_act, text="⬆ LANCER Améliorations",
+                   command=self.run_upgrades).pack(side="left", padx=5)
+        ttk.Button(f_act, text="🛑 STOP",
+                   command=self.stop_upgrades).pack(side="left", padx=5)
+
+        # --- Log dédié ---
+        lf_log = ttk.LabelFrame(frame, text="Journal")
+        lf_log.pack(fill="both", expand=True, padx=10, pady=10)
+        self.txt_upgrades_log = tk.Text(lf_log, height=15, state="disabled")
+        self.txt_upgrades_log.pack(fill="both", expand=True, padx=5, pady=5)
+
+    def _upgrades_log(self, msg):
+        def append():
+            self.txt_upgrades_log.config(state="normal")
+            self.txt_upgrades_log.insert("end", str(msg) + "\n")
+            self.txt_upgrades_log.see("end")
+            self.txt_upgrades_log.config(state="disabled")
+        self.after(0, append)
+        print(msg)
+
+    def _refresh_upgrades_cfg_status(self):
+        path = upgrades.UPGRADES_CONFIG_FILE
+        if os.path.exists(path):
+            self.lbl_upgrades_cfg_status.config(
+                text=f"Config trouvée : {path}", foreground="green")
+        else:
+            self.lbl_upgrades_cfg_status.config(
+                text="Aucune config — définissez la zone élixir noir et les boutons.",
+                foreground="orange")
+
+    def show_upgrades_config(self):
+        cfg = upgrades.load_upgrades_config()
+        win = tk.Toplevel(self)
+        win.title("upgrades_config.json")
+        win.geometry("500x500")
+        txt = tk.Text(win)
+        txt.pack(fill="both", expand=True)
+        txt.insert("1.0", json.dumps(cfg, indent=4, ensure_ascii=False))
+
+    def save_upgrades_params(self):
+        cfg = upgrades.load_upgrades_config()
+        cfg.setdefault("params", {})
+        cfg["params"]["use_or"]            = bool(self.var_upg_use_or.get())
+        cfg["params"]["use_elexir"]        = bool(self.var_upg_use_elexir.get())
+        cfg["params"]["use_elexir_noir"]   = bool(self.var_upg_use_noir.get())
+        cfg["params"]["include_remparts"]  = bool(self.var_upg_remparts.get())
+        cfg["params"]["keep_workers_free"] = max(0, int(self.var_upg_keep_workers.get()))
+        cfg["params"]["max_upgrades"]      = max(1, int(self.var_upg_max_upgrades.get()))
+        cfg["params"]["max_scrolls"]       = max(0, int(self.var_upg_max_scrolls.get()))
+        cfg["params"]["scroll_amount"]     = int(self.var_upg_scroll_amount.get())
+        upgrades.save_upgrades_config(cfg)
+        self._upgrades_log("Paramètres sauvegardés.")
+        self._refresh_upgrades_cfg_status()
+        return cfg
+
+    def _apply_upgrades_cfg_to_gui(self, cfg):
+        p = cfg.get("params", {})
+        self.var_upg_use_or.set(bool(p.get("use_or", True)))
+        self.var_upg_use_elexir.set(bool(p.get("use_elexir", True)))
+        self.var_upg_use_noir.set(bool(p.get("use_elexir_noir", True)))
+        self.var_upg_remparts.set(bool(p.get("include_remparts", False)))
+        self.var_upg_keep_workers.set(max(0, int(p.get("keep_workers_free", 0))))
+        self.var_upg_max_upgrades.set(int(p.get("max_upgrades", 10)))
+        self.var_upg_max_scrolls.set(int(p.get("max_scrolls", 8)))
+        self.var_upg_scroll_amount.set(int(p.get("scroll_amount", -3)))
+
+    def save_upgrades_config_as(self):
+        """Enregistre la configuration courante sous un nom (Configs/Upgrades)."""
+        cfg = self.save_upgrades_params()  # aussi écrite comme config active
+        name = simpledialog.askstring(
+            "Configuration nommée",
+            "Nom de la configuration (sans .json) :", parent=self)
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        if not name.endswith(".json"):
+            name += ".json"
+        try:
+            path = upgrades.save_upgrades_config(cfg, name)
+            self._upgrades_log(f"Config enregistrée : {path}")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def load_upgrades_config_from(self):
+        """Charge une configuration nommée et en fait la config active."""
+        os.makedirs(upgrades.UPGRADES_CONFIG_DIR, exist_ok=True)
+        path = filedialog.askopenfilename(
+            title="Charger une configuration d'améliorations",
+            initialdir=upgrades.UPGRADES_CONFIG_DIR,
+            filetypes=[("JSON", "*.json")], parent=self)
+        if not path:
+            return
+        try:
+            cfg = upgrades.load_upgrades_config(path)
+            self._apply_upgrades_cfg_to_gui(cfg)
+            upgrades.save_upgrades_config(cfg)  # devient la config active
+            self._upgrades_log(f"Config chargée (et activée) : {path}")
+            self._refresh_upgrades_cfg_status()
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def configure_upgrades_wizard(self):
+        def on_save(cfg):
+            upgrades.save_upgrades_config(cfg)
+            self._upgrades_log("Configuration des coordonnées sauvegardée.")
+            self._refresh_upgrades_cfg_status()
+
+        self._run_config_wizard(
+            title="Configuration — Auto Améliorations",
+            cfg=upgrades.load_upgrades_config(),
+            steps=upgrades.UPGRADES_CONFIG_STEPS,
+            on_save=on_save,
+            log=self._upgrades_log,
+        )
+
+    def test_upgrades_ocr(self):
+        def task():
+            try:
+                self.save_upgrades_params()
+                runner = upgrades.UpgradesRunner(log_callback=self._upgrades_log)
+                self._upgrades_log("--- Test OCR ressources ---")
+                runner.read_full_state()
+                self._upgrades_log("--- Fin test ---")
+            except Exception as e:
+                self._upgrades_log(f"Erreur test OCR : {e}")
+        threading.Thread(target=task, daemon=True).start()
+
+    def test_upgrades_rows(self):
+        """Lit la liste actuellement affichée (sans cliquer) et journalise
+        nom | symbole | prix de chaque ligne + screenshot annoté."""
+        def task():
+            try:
+                self.save_upgrades_params()
+                runner = upgrades.UpgradesRunner(log_callback=self._upgrades_log)
+                self._upgrades_log("--- Lecture de la liste (nom | symbole | prix) ---")
+                rows, img, offset = runner.read_upgrade_rows()
+                if not rows:
+                    self._upgrades_log("Aucune ligne lue. La liste est-elle ouverte ? "
+                                       "Le séparateur X est-il configuré (onglet Auto Remparts) ?")
+                    return
+                for row in rows:
+                    c = row["counts"]
+                    flag = "  ⚠ NOUV. (ignoré)" if row.get("is_new") else ""
+                    self._upgrades_log(
+                        f"  '{row['name']}' | {row['symbol'] or '?'} | {row['price']}{flag}"
+                        f"   (px or={c['or']} elexir={c['elexir']} "
+                        f"noir={c['elexir_noir']} vert={c.get('nouv', 0)})")
+                runner._save_rows_debug(rows, img, offset)
+                self._upgrades_log("--- Fin lecture ---")
+            except Exception as e:
+                self._upgrades_log(f"Erreur lecture liste : {e}")
+        threading.Thread(target=task, daemon=True).start()
+
+    def run_upgrades(self):
+        if self.upgrades_thread and self.upgrades_thread.is_alive():
+            messagebox.showwarning("En cours", "Une session d'améliorations tourne déjà.")
+            return
+        self.save_upgrades_params()
+        self.save_walls_params()  # séparateur / offsets partagés
+        self.upgrades_stop_event.clear()
+
+        def task():
+            try:
+                runner = upgrades.UpgradesRunner(
+                    log_callback=self._upgrades_log,
+                    stop_event=self.upgrades_stop_event,
+                )
+                self._upgrades_log("=== Lancement Auto-Améliorations ===")
+                runner.run()
+            except Exception as e:
+                self._upgrades_log(f"Erreur Auto-Améliorations : {e}")
+
+        self.upgrades_thread = threading.Thread(target=task, daemon=True)
+        self.upgrades_thread.start()
+
+    def stop_upgrades(self):
+        if self.upgrades_thread and self.upgrades_thread.is_alive():
+            self.upgrades_stop_event.set()
+            self._upgrades_log("Demande d'arrêt envoyée…")
+        else:
+            self._upgrades_log("Aucune session en cours.")
+
+    # ====================================================================
+    # MULTI COMPTE
+    # ====================================================================
+
+    def create_multi_tab(self):
+        frame = self._make_scrollable_tab("👥 Multi Compte")
+
+        # État : dernière configuration utilisée (rechargée automatiquement)
+        last = multi_account.load_multi_config()
+        self.multi_entries = last["entries"]
+        self.var_multi_loop = tk.BooleanVar(value=last["loop"])
+
+        # --- Comptes ---
+        lf_acc = ttk.LabelFrame(frame, text="Comptes (exécutés dans l'ordre)")
+        lf_acc.pack(fill="both", expand=False, padx=10, pady=10)
+
+        cols = ("switch", "armee", "attaque", "nb", "rituel", "tous_les", "config")
+        self.tree_multi = ttk.Treeview(lf_acc, columns=cols, height=8)
+        self.tree_multi.heading("#0",       text="Nom")
+        self.tree_multi.heading("switch",   text="Switch")
+        self.tree_multi.heading("armee",    text="Armée")
+        self.tree_multi.heading("attaque",  text="Attaque")
+        self.tree_multi.heading("nb",       text="Nb atk")
+        self.tree_multi.heading("rituel",   text="Rituel")
+        self.tree_multi.heading("tous_les", text="Tous les")
+        self.tree_multi.heading("config",   text="Config amélio.")
+        self.tree_multi.column("#0",       width=110)
+        self.tree_multi.column("switch",   width=150)
+        self.tree_multi.column("armee",    width=150)
+        self.tree_multi.column("attaque",  width=150)
+        self.tree_multi.column("nb",       width=50,  anchor="center")
+        self.tree_multi.column("rituel",   width=100, anchor="center")
+        self.tree_multi.column("tous_les", width=60,  anchor="center")
+        self.tree_multi.column("config",   width=130)
+        self.tree_multi.pack(fill="x", padx=5, pady=5)
+        self.tree_multi.bind("<Double-Button-1>", lambda e: self._multi_edit())
+
+        f_btn = ttk.Frame(lf_acc)
+        f_btn.pack(fill="x", padx=5, pady=2)
+        ttk.Button(f_btn, text="➕ Ajouter",
+                   command=self._multi_add).pack(side="left", padx=2)
+        ttk.Button(f_btn, text="✏ Éditer",
+                   command=self._multi_edit).pack(side="left", padx=2)
+        ttk.Button(f_btn, text="🗑 Supprimer",
+                   command=self._multi_remove).pack(side="left", padx=2)
+        ttk.Button(f_btn, text="⬆ Monter",
+                   command=lambda: self._multi_move(-1)).pack(side="left", padx=(15, 2))
+        ttk.Button(f_btn, text="⬇ Descendre",
+                   command=lambda: self._multi_move(1)).pack(side="left", padx=2)
+
+        self._refresh_multi_tree()
+
+        # --- Options + configuration générale ---
+        lf_opt = ttk.LabelFrame(frame, text="Options & configuration générale")
+        lf_opt.pack(fill="x", padx=10, pady=5)
+
+        f_opt = ttk.Frame(lf_opt)
+        f_opt.pack(fill="x", padx=5, pady=5)
+        ttk.Checkbutton(f_opt, text="🔁 Boucler sur les comptes (recommence au premier)",
+                        variable=self.var_multi_loop,
+                        command=self._multi_persist).pack(side="left", padx=5)
+        ttk.Button(f_opt, text="💾 Enregistrer configuration…",
+                   command=self.save_multi_config_as).pack(side="left", padx=(30, 5))
+        ttk.Button(f_opt, text="📂 Charger configuration…",
+                   command=self.load_multi_config_from).pack(side="left", padx=5)
+
+        ttk.Label(lf_opt, foreground="gray",
+                  text="Pour chaque compte : switch → sélection d'armée → N attaques, avec rituel optionnel\n"
+                       "(remparts OU améliorations 1ers choix — un seul) toutes les X attaques.\n"
+                       "Les configurations générales sont enregistrées dans Configs/MultiCompte ;\n"
+                       "l'état courant est aussi restauré automatiquement au démarrage."
+                  ).pack(anchor="w", padx=10, pady=2)
+
+        # --- Actions ---
+        lf_act = ttk.LabelFrame(frame, text="Actions")
+        lf_act.pack(fill="x", padx=10, pady=10)
+        f_act = ttk.Frame(lf_act)
+        f_act.pack(fill="x", padx=5, pady=5)
+        ttk.Button(f_act, text="▶ LANCER Multi Compte",
+                   command=self.run_multi_session).pack(side="left", padx=5)
+        ttk.Button(f_act, text="🛑 STOP",
+                   command=self.stop_multi_session).pack(side="left", padx=5)
+
+        # --- Journal dédié ---
+        lf_log = ttk.LabelFrame(frame, text="Journal")
+        lf_log.pack(fill="both", expand=True, padx=10, pady=10)
+        self.txt_multi_log = tk.Text(lf_log, height=12, state="disabled")
+        self.txt_multi_log.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.multi_stop_event = threading.Event()
+        self.multi_thread = None
+
+    def _multi_log(self, msg):
+        def append():
+            self.txt_multi_log.config(state="normal")
+            self.txt_multi_log.insert("end", str(msg) + "\n")
+            self.txt_multi_log.see("end")
+            self.txt_multi_log.config(state="disabled")
+        self.after(0, append)
+        print(msg)
+
+    def _refresh_multi_tree(self):
+        self.tree_multi.delete(*self.tree_multi.get_children())
+        for i, e in enumerate(self.multi_entries):
+            rit = multi_account.RITUAL_LABELS.get(e.get("ritual", "none"), "?")
+            every = e.get("ritual_every", "") if e.get("ritual") != "none" else ""
+            cfgname = (e.get("upgrades_config") or "(active)"
+                       if e.get("ritual") == "upgrades" else "")
+            self.tree_multi.insert(
+                "", "end", iid=str(i), text=e.get("name") or "(sans nom)",
+                values=(e.get("switch_file", ""), e.get("army_file", ""),
+                        e.get("attack_file", ""), e.get("nb_attacks", 0),
+                        rit, every, cfgname))
+
+    def _multi_selected_index(self):
+        sel = self.tree_multi.selection()
+        return int(sel[0]) if sel else None
+
+    def _multi_persist(self):
+        """Sauvegarde automatique de l'état courant (rechargé au démarrage)."""
+        multi_account.save_multi_config({
+            "loop":    bool(self.var_multi_loop.get()),
+            "entries": self.multi_entries,
+        })
+
+    def _multi_add(self):
+        self._open_multi_editor(None)
+
+    def _multi_edit(self):
+        idx = self._multi_selected_index()
+        if idx is None:
+            messagebox.showinfo("Information", "Sélectionnez un compte à éditer.")
+            return
+        self._open_multi_editor(idx)
+
+    def _multi_remove(self):
+        idx = self._multi_selected_index()
+        if idx is None:
+            return
+        name = self.multi_entries[idx].get("name") or "(sans nom)"
+        if not messagebox.askyesno("Confirmation", f"Supprimer le compte '{name}' ?"):
+            return
+        del self.multi_entries[idx]
+        self._multi_persist()
+        self._refresh_multi_tree()
+
+    def _multi_move(self, delta):
+        idx = self._multi_selected_index()
+        if idx is None:
+            return
+        new = idx + delta
+        if not (0 <= new < len(self.multi_entries)):
+            return
+        ent = self.multi_entries.pop(idx)
+        self.multi_entries.insert(new, ent)
+        self._multi_persist()
+        self._refresh_multi_tree()
+        self.tree_multi.selection_set(str(new))
+
+    def _open_multi_editor(self, index):
+        """index = None → ajout ; sinon édition de l'entrée à l'index donné."""
+        is_new = index is None
+        entry = multi_account.normalize_entry(
+            None if is_new else self.multi_entries[index])
+
+        action_files = [""] + list(getattr(self, "action_files", []))
+        named_cfgs = [""] + upgrades.list_named_configs()
+
+        win = tk.Toplevel(self)
+        win.title("Nouveau compte" if is_new else f"Édition — {entry.get('name', '')}")
+        win.geometry("480x430")
+        win.transient(self)
+        win.grab_set()
+
+        v_name   = tk.StringVar(value=entry["name"])
+        v_switch = tk.StringVar(value=entry["switch_file"])
+        v_army   = tk.StringVar(value=entry["army_file"])
+        v_attack = tk.StringVar(value=entry["attack_file"])
+        v_nb     = tk.IntVar(value=int(entry["nb_attacks"]))
+        v_ritual = tk.StringVar(value=entry["ritual"])
+        v_every  = tk.IntVar(value=int(entry["ritual_every"]))
+        v_ucfg   = tk.StringVar(value=entry["upgrades_config"])
+
+        grid = ttk.Frame(win)
+        grid.pack(fill="both", expand=True, padx=10, pady=10)
+
+        def row(r, label, var, values=None):
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w", pady=4)
+            if values is not None:
+                ttk.Combobox(grid, textvariable=var, values=values,
+                             width=36).grid(row=r, column=1, columnspan=2,
+                                            sticky="ew", pady=4)
+            else:
+                ttk.Entry(grid, textvariable=var, width=38).grid(
+                    row=r, column=1, columnspan=2, sticky="ew", pady=4)
+
+        row(0, "Nom :",                 v_name)
+        row(1, "Script switch compte :", v_switch, action_files)
+        row(2, "Sélection d'armée :",    v_army,   action_files)
+        row(3, "Fichier d'attaque :",    v_attack, action_files)
+
+        ttk.Label(grid, text="Nb attaques :").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Entry(grid, textvariable=v_nb, width=6).grid(row=4, column=1, sticky="w", pady=4)
+
+        # --- Rituel (un seul choix possible) ---
+        lf_rit = ttk.LabelFrame(grid, text="Rituel toutes les X attaques (un seul choix)")
+        lf_rit.grid(row=5, column=0, columnspan=3, sticky="ew", pady=8)
+
+        cb_ucfg = ttk.Combobox(lf_rit, textvariable=v_ucfg, values=named_cfgs, width=28)
+
+        def update_ritual_state():
+            cb_ucfg.configure(state="readonly" if v_ritual.get() == "upgrades"
+                              else "disabled")
+
+        for i, (key, label) in enumerate(multi_account.RITUAL_LABELS.items()):
+            ttk.Radiobutton(lf_rit, text=label, value=key, variable=v_ritual,
+                            command=update_ritual_state).grid(
+                row=0, column=i, sticky="w", padx=8, pady=4)
+
+        ttk.Label(lf_rit, text="Toutes les").grid(row=1, column=0, sticky="e", pady=4)
+        ttk.Entry(lf_rit, textvariable=v_every, width=4).grid(row=1, column=1, sticky="w")
+        ttk.Label(lf_rit, text="attaques").grid(row=1, column=2, sticky="w")
+
+        ttk.Label(lf_rit, text="Config améliorations :").grid(
+            row=2, column=0, sticky="e", pady=4)
+        cb_ucfg.grid(row=2, column=1, columnspan=2, sticky="w", pady=4)
+        ttk.Label(lf_rit, foreground="gray",
+                  text="(vide = config active de l'onglet ⬆ Auto Améliorations)"
+                  ).grid(row=3, column=0, columnspan=3, sticky="w", padx=8)
+        update_ritual_state()
+
+        grid.columnconfigure(1, weight=1)
+
+        def save_and_close():
+            name = v_name.get().strip()
+            switch_file = v_switch.get().strip()
+            if not name:
+                messagebox.showwarning("Erreur", "Le nom est obligatoire.", parent=win)
+                return
+            if not switch_file:
+                messagebox.showwarning("Erreur",
+                                       "Le script switch est obligatoire.", parent=win)
+                return
+            new_entry = {
+                "name":            name,
+                "switch_file":     switch_file,
+                "army_file":       v_army.get().strip(),
+                "attack_file":     v_attack.get().strip(),
+                "nb_attacks":      max(0, int(v_nb.get())),
+                "ritual":          v_ritual.get(),
+                "ritual_every":    max(1, int(v_every.get())),
+                "upgrades_config": v_ucfg.get().strip(),
+            }
+            if is_new:
+                self.multi_entries.append(new_entry)
+            else:
+                self.multi_entries[index] = new_entry
+            self._multi_persist()
+            self._refresh_multi_tree()
+            win.destroy()
+
+        bar = ttk.Frame(win)
+        bar.pack(fill="x", padx=10, pady=8)
+        ttk.Button(bar, text="Enregistrer", command=save_and_close).pack(side="right")
+        ttk.Button(bar, text="Annuler", command=win.destroy).pack(side="right", padx=6)
+
+    def save_multi_config_as(self):
+        os.makedirs(multi_account.MULTI_CONFIG_DIR, exist_ok=True)
+        path = filedialog.asksaveasfilename(
+            title="Enregistrer la configuration multi-comptes",
+            initialdir=multi_account.MULTI_CONFIG_DIR,
+            defaultextension=".json", filetypes=[("JSON", "*.json")], parent=self)
+        if not path:
+            return
+        try:
+            multi_account.save_multi_config({
+                "loop":    bool(self.var_multi_loop.get()),
+                "entries": self.multi_entries,
+            }, path)
+            self._multi_log(f"Configuration enregistrée : {path}")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def load_multi_config_from(self):
+        os.makedirs(multi_account.MULTI_CONFIG_DIR, exist_ok=True)
+        path = filedialog.askopenfilename(
+            title="Charger une configuration multi-comptes",
+            initialdir=multi_account.MULTI_CONFIG_DIR,
+            filetypes=[("JSON", "*.json")], parent=self)
+        if not path:
+            return
+        try:
+            cfg = multi_account.load_multi_config(path)
+            self.multi_entries = cfg["entries"]
+            self.var_multi_loop.set(cfg["loop"])
+            self._multi_persist()
+            self._refresh_multi_tree()
+            self._multi_log(f"Configuration chargée : {path} "
+                            f"({len(self.multi_entries)} compte(s))")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+    def run_multi_session(self):
+        if self.multi_thread and self.multi_thread.is_alive():
+            messagebox.showwarning("En cours", "Une session multi-comptes tourne déjà.")
+            return
+        if not self.multi_entries:
+            messagebox.showwarning("Attention", "Aucun compte configuré !")
+            return
+        self._multi_persist()
+        self.multi_stop_event = threading.Event()
+        entries = [dict(e) for e in self.multi_entries]
+        loop = bool(self.var_multi_loop.get())
+
+        def task():
+            self._multi_log("=== Lancement session Multi Compte ===")
+            try:
+                multi_account.run_multi_session(
+                    entries, loop=loop,
+                    log_callback=self._multi_log,
+                    stop_event=self.multi_stop_event)
+            except Exception as e:
+                self._multi_log(f"Erreur Multi Compte : {e}")
+
+        self.multi_thread = self._spawn_automation(
+            task, name="multi_compte", stop_event=self.multi_stop_event)
+
+    def stop_multi_session(self):
+        if self.multi_thread and self.multi_thread.is_alive():
+            self.multi_stop_event.set()
+            self._multi_log("Demande d'arrêt envoyée…")
+        else:
+            self._multi_log("Aucune session en cours.")
+
     def create_data_tab(self):
         frame = ttk.Frame(self.notebook)
         self.notebook.add(frame, text="📊 Données")
@@ -703,19 +1375,32 @@ class CLASH_GUI(tk.Tk):
         print(dim) # Also print to console
 
     def refresh_action_files(self):
+        """Liste les macros JSON du dossier Actions, sous-dossiers compris
+        (ex : 'attaque/attaquehdv13.json'), pour segmenter les fichiers."""
         self.lst_actions.delete(0, 'end')
         self.action_files = []
-        
-        # Chemin vers le dossier Actions
-        actions_dir = os.path.join(os.path.dirname(__file__), "Actions")
-        if not os.path.exists(actions_dir):
-            os.makedirs(actions_dir)
-            
-        for f in os.listdir(actions_dir):
-            if f.endswith(".json"):
-                self.lst_actions.insert('end', f)
-                self.action_files.append(f)
-        
+
+        # Chemin vers le dossier Actions + sous-dossiers standards
+        base_dir = os.path.dirname(__file__)
+        actions_dir = os.path.join(base_dir, "Actions")
+        for d in (actions_dir,
+                  os.path.join(actions_dir, "attaque"),
+                  os.path.join(actions_dir, "switch"),
+                  os.path.join(actions_dir, "armee"),
+                  upgrades.UPGRADES_CONFIG_DIR,
+                  multi_account.MULTI_CONFIG_DIR):
+            os.makedirs(d, exist_ok=True)
+
+        for root, _dirs, files in os.walk(actions_dir):
+            for f in files:
+                if f.endswith(".json"):
+                    rel = os.path.relpath(os.path.join(root, f), actions_dir)
+                    self.action_files.append(rel.replace(os.sep, "/"))
+        self.action_files.sort()
+
+        for f in self.action_files:
+            self.lst_actions.insert('end', f)
+
         self.cb_strat_main['values'] = self.action_files
         self.cb_strat_night['values'] = self.action_files
 
@@ -1108,12 +1793,17 @@ class CLASH_GUI(tk.Tk):
 
         walls_every = (int(self.var_walls_ritual_every.get())
                        if self.var_walls_ritual_enabled.get() else 0)
+        upgrades_every = (int(self.var_upgrades_ritual_every.get())
+                          if self.var_upgrades_ritual_enabled.get() else 0)
         stop_event = threading.Event()
 
         def task():
             self.log("Démarrage de la session d'attaques…")
             if walls_every > 0:
                 self.log(f"Rituel remparts activé : toutes les {walls_every} attaques.")
+            if upgrades_every > 0:
+                self.log(f"Rituel améliorations (1ers choix) activé : "
+                         f"toutes les {upgrades_every} attaques.")
             try:
                 attack_session.run_attack_session(
                     accounts,
@@ -1123,6 +1813,7 @@ class CLASH_GUI(tk.Tk):
                     strategy_file=strat,
                     night_strategy_file=strat_night,
                     walls_every=walls_every,
+                    upgrades_every=upgrades_every,
                     log_callback=self.log,
                     walls_log_callback=self.log,
                     stop_event=stop_event,
@@ -1199,6 +1890,8 @@ class CLASH_GUI(tk.Tk):
 
         walls_every = (int(self.var_walls_ritual_every.get())
                        if self.var_walls_ritual_enabled.get() else 0)
+        upgrades_every = (int(self.var_upgrades_ritual_every.get())
+                          if self.var_upgrades_ritual_enabled.get() else 0)
 
         cfg = {
             "type": orchestration.TASK_ATTACK,
@@ -1210,6 +1903,7 @@ class CLASH_GUI(tk.Tk):
             "strategy_file":       strat,
             "night_strategy_file": self.var_strat_night.get(),
             "walls_every":         walls_every,
+            "upgrades_every":      upgrades_every,
         }
 
         name = self._ask_config_name("attaque")
@@ -1571,6 +2265,15 @@ class CLASH_GUI(tk.Tk):
         wt = getattr(self, "walls_thread", None)
         if wt is not None and wt.is_alive():
             orchestration.async_raise(wt, orchestration.EmergencyStop)
+
+        # Améliorations (premier choix)
+        try:
+            self.upgrades_stop_event.set()
+        except Exception:
+            pass
+        ut = getattr(self, "upgrades_thread", None)
+        if ut is not None and ut.is_alive():
+            orchestration.async_raise(ut, orchestration.EmergencyStop)
 
         # Orchestrateur (pose les drapeaux + force la mort du worker)
         if hasattr(self, "orchestrator") and self.orchestrator.is_running():

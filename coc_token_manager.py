@@ -17,6 +17,8 @@ import logging
 import os
 from dotenv import load_dotenv
 
+from env_setup import ensure_env
+
 load_dotenv()  # Charge automatiquement le fichier .env
 
 DEV_PORTAL = "https://developer.clashofclans.com/api"
@@ -47,6 +49,9 @@ def get_or_create_token(key_name: str = KEY_NAME) -> str:
       3. Sinon → révoque les clés obsolètes (même nom, mauvaise IP)
                  puis crée une nouvelle clé pour l'IP actuelle
     """
+    # Ouvre l'interface de configuration si le .env est absent/incomplet
+    ensure_env()
+
     email    = os.getenv("DEV_EMAIL")
     password = os.getenv("DEV_PASSWORD")
 

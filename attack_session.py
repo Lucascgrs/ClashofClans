@@ -23,6 +23,7 @@ from typing import Callable, Iterable, Optional
 
 from playback import LecteurPosition
 from walls import WallsUpgrader
+from upgrades import UpgradesRunner
 
 
 ATTACK_CONFIG_FILE = os.path.join(
@@ -101,14 +102,19 @@ def run_attack_session(
     strategy_file: Optional[str] = None,
     night_strategy_file: Optional[str] = None,
     walls_every: int = 0,
+    upgrades_every: int = 0,
     log_callback: Optional[LogCallback] = None,
     walls_log_callback: Optional[LogCallback] = None,
     stop_event=None,
 ) -> None:
     """Lance la session d'attaques sur les comptes fournis.
 
-    `walls_every` : si > 0, lance WallsUpgrader.run() toutes les N attaques
-                    (défaites + jour + nuit confondues).
+    `walls_every`    : si > 0, lance WallsUpgrader.run() toutes les N attaques
+                       (défaites + jour + nuit confondues).
+    `upgrades_every` : si > 0, lance UpgradesRunner.run() (premiers choix de la
+                       liste d'améliorations) toutes les N attaques. Exclusif
+                       de `walls_every` côté GUI, mais les deux compteurs sont
+                       indépendants ici.
     """
     log: LogCallback = log_callback or print
     cfg = load_attack_config()
@@ -116,7 +122,7 @@ def run_attack_session(
     delays = cfg["delays"]
 
     neutral = actions.get("neutral_click")
-    counter = {"n": 0}
+    counters = {"walls": 0, "upgrades": 0}
 
     def _stop() -> bool:
         return stop_event is not None and stop_event.is_set()
@@ -129,17 +135,30 @@ def run_attack_session(
             time.sleep(seconds)
 
     def _maybe_walls() -> None:
-        if walls_every <= 0:
-            return
-        counter["n"] += 1
-        if counter["n"] >= walls_every:
-            counter["n"] = 0
-            log(f"--- Rituel remparts (toutes les {walls_every} attaques) ---")
-            _isleep(delays.get("before_walls_ritual", 1.5))
-            try:
-                WallsUpgrader(log_callback=walls_log_callback or log).run()
-            except Exception as e:
-                log(f"Erreur rituel remparts : {e}")
+        """Rituels intercalés après chaque attaque : remparts et/ou 1ers choix."""
+        if walls_every > 0:
+            counters["walls"] += 1
+            if counters["walls"] >= walls_every:
+                counters["walls"] = 0
+                log(f"--- Rituel remparts (toutes les {walls_every} attaques) ---")
+                _isleep(delays.get("before_walls_ritual", 1.5))
+                try:
+                    WallsUpgrader(log_callback=walls_log_callback or log,
+                                  stop_event=stop_event).run()
+                except Exception as e:
+                    log(f"Erreur rituel remparts : {e}")
+        if upgrades_every > 0:
+            counters["upgrades"] += 1
+            if counters["upgrades"] >= upgrades_every:
+                counters["upgrades"] = 0
+                log(f"--- Rituel améliorations 1ers choix "
+                    f"(toutes les {upgrades_every} attaques) ---")
+                _isleep(delays.get("before_walls_ritual", 1.5))
+                try:
+                    UpgradesRunner(log_callback=walls_log_callback or log,
+                                   stop_event=stop_event).run()
+                except Exception as e:
+                    log(f"Erreur rituel améliorations : {e}")
 
     for acc in accounts:
         if _stop():

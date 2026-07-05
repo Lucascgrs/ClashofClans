@@ -55,12 +55,17 @@ pip install requests pandas pyarrow tqdm matplotlib pyautogui pyperclip ^
 Variables d'environnement attendues (dans `.env` à la racine du dossier) :
 
 ```
-COC_EMAIL=...
-COC_PASSWORD=...
+DEV_EMAIL=...
+DEV_PASSWORD=...
 ```
 
-(Utilisées par `coc_token_manager.py` pour générer/rafraîchir le token via le
-portail développeur Supercell.)
+(Identifiants du portail développeur Supercell, utilisés par
+`coc_token_manager.py` pour générer/rafraîchir le token API.)
+
+**Pas besoin de créer le `.env` à la main :** au premier lancement, si ces
+variables sont absentes, une petite fenêtre de configuration s'ouvre
+automatiquement (`env_setup.py`) pour les saisir et générer le fichier `.env`.
+Pour reconfigurer manuellement : `python env_setup.py` (ou `--force`).
 
 ---
 

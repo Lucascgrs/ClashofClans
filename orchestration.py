@@ -257,6 +257,7 @@ def run_attack(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
         strategy_file=cfg.get("strategy_file") or None,
         night_strategy_file=cfg.get("night_strategy_file") or None,
         walls_every=int(cfg.get("walls_every", 0)),
+        upgrades_every=int(cfg.get("upgrades_every", 0)),
         log_callback=log,
         walls_log_callback=log,
         stop_event=stop_event,

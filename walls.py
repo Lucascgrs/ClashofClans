@@ -61,6 +61,18 @@ WALLS_DEFAULT_CONFIG = {
         "click_y_offset":     0,    # px sous le centre vertical du texte
         "manual_price_or":     0,   # > 0 = court-circuite l'OCR du prix
         "manual_price_elexir": 0,
+        # Barre verticale séparant NOMS (gauche) et SYMBOLE + PRIX (droite)
+        # dans la liste des améliorations. 0 = non configurée → ancien mode
+        # (OCR pleine largeur, nom et prix mélangés).
+        "price_split_x":       0,
+        # Détection du symbole de ressource par comptage de pixels colorés :
+        # nb de pixels minimum pour valider or/elexir, et seuil (plus haut)
+        # pour l'élixir noir (les contours sombres des icônes créent du bruit).
+        "symbol_min_pixels":      80,
+        "symbol_min_pixels_dark": 250,
+        # Étiquette verte 'Nouv.' (nouveau bâtiment, pas une amélioration) :
+        # nb de pixels verts minimum dans la partie nom pour marquer la ligne.
+        "new_min_pixels":         60,
     },
 }
 
@@ -97,7 +109,8 @@ def _extract_price(text_after_keyword: str) -> tuple[int, str]:
 
 
 # Description de l'assistant de configuration : (clé dotée, type, titre, description).
-# type = "point" -> 1 capture (x, y) ; "zone" -> 2 captures (haut-gauche, bas-droit).
+# type = "point" -> 1 capture (x, y) ; "zone" -> 2 captures (haut-gauche, bas-droit) ;
+# "vline" -> 1 capture dont seule la position X est retenue (barre verticale).
 WALLS_CONFIG_STEPS = [
     ("zones.ouvriers",            "zone",
      "Zone NB OUVRIERS",
@@ -111,6 +124,9 @@ WALLS_CONFIG_STEPS = [
     ("zones.liste_ameliorations", "zone",
      "Zone LISTE AMÉLIORATIONS (scrollable)",
      "Ouvrez la liste des améliorations (info ouvriers) puis délimitez les 2 coins (haut-gauche et bas-droit) du grand rectangle qui contient la liste. Le programme scrollera la molette à l'intérieur de cette zone pour faire défiler."),
+    ("params.price_split_x",      "vline",
+     "Séparateur NOM / PRIX (barre verticale)",
+     "Toujours dans la liste des améliorations : placez la souris sur la frontière verticale entre les NOMS (à gauche) et les SYMBOLES + PRIX (à droite), puis appuyez sur ENTRÉE. Seule la position X est utilisée. Veillez à ce que tous les symboles de ressource soient à DROITE de cette barre."),
     ("buttons.info_ouvriers",     "point",
      "Bouton 'i' Info Ouvriers",
      "Placez la souris sur le petit 'i' à côté de l'icône des ouvriers et appuyez sur ENTRÉE."),
@@ -192,8 +208,9 @@ class WallsUpgrader:
         if self._cam is None:
             self._cam = dxcam.create()
 
-    def _grab(self, zone: dict):
-        """Capture binarisée d'une zone. Retourne (image, (offset_x, offset_y))."""
+    def _grab_color(self, zone: dict):
+        """Capture brute (RGB, sans binarisation) d'une zone.
+        Retourne (image, (offset_x, offset_y))."""
         self._init_capture()
         x1, y1, x2, y2 = zone["x1"], zone["y1"], zone["x2"], zone["y2"]
         if x2 <= x1 or y2 <= y1:
@@ -202,6 +219,11 @@ class WallsUpgrader:
         if img is None:
             time.sleep(0.05)
             img = self._cam.grab(region=(x1, y1, x2, y2))
+        return img, (x1, y1)
+
+    def _grab(self, zone: dict):
+        """Capture binarisée d'une zone. Retourne (image, (offset_x, offset_y))."""
+        img, (x1, y1) = self._grab_color(zone)
         if img is None:
             return None, (x1, y1)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -216,14 +238,9 @@ class WallsUpgrader:
         results = self._reader.readtext(img)
         return " ".join(r[1] for r in results)
 
-    def _ocr_lines(self, zone: dict, line_threshold: int = 22):
-        """OCR + regroupement par lignes. Coordonnées en absolu écran.
-        Retourne (lignes, image_binarisée, (offset_x, offset_y))."""
-        self._init_capture()
-        img, (ox, oy) = self._grab(zone)
-        if img is None:
-            return [], None, (0, 0)
-        results = self._reader.readtext(img)
+    @staticmethod
+    def _group_lines(results, ox: int, oy: int, line_threshold: int = 22):
+        """Regroupe des détections EasyOCR en lignes (coordonnées absolues écran)."""
         detections = []
         for bbox, text, _conf in results:
             xs = [p[0] for p in bbox]
@@ -259,7 +276,167 @@ class WallsUpgrader:
                 "bot":   max(d["bot"]   for d in line),
                 "cy":    sum(d["cy"]    for d in line) / len(line),
             })
-        return merged, img, (ox, oy)
+        return merged
+
+    def _ocr_lines(self, zone: dict, line_threshold: int = 22):
+        """OCR + regroupement par lignes. Coordonnées en absolu écran.
+        Retourne (lignes, image_binarisée, (offset_x, offset_y))."""
+        self._init_capture()
+        img, (ox, oy) = self._grab(zone)
+        if img is None:
+            return [], None, (0, 0)
+        results = self._reader.readtext(img)
+        return self._group_lines(results, ox, oy, line_threshold), img, (ox, oy)
+
+    # ---------- séparation NOM / (SYMBOLE + PRIX) ----------
+
+    # Plages HSV (OpenCV : H ∈ [0,179]) des symboles de ressource.
+    # L'or est jaune/doré, l'élixir rose/violet. Le prix (blanc) n'entre
+    # dans aucune plage (saturation quasi nulle) : il n'interfère pas.
+    _SYMBOL_HSV_RANGES = {
+        "or":     ((15, 110, 120), (40, 255, 255)),
+        "elexir": ((130, 70, 70), (175, 255, 255)),
+    }
+
+    # Vert vif de l'étiquette 'Nouv.' (nouveau bâtiment). Ce texte vert est
+    # invisible pour l'OCR des noms (binarisation blanche) : on le détecte
+    # donc par comptage de pixels verts dans la partie nom de la ligne.
+    _NEW_HSV_RANGE = ((40, 100, 100), (85, 255, 255))
+
+    def _split_x(self) -> int:
+        """Position X absolue de la barre verticale nom/prix, ou 0 si non
+        configurée / hors de la zone liste (→ ancien mode pleine largeur)."""
+        z = self.cfg["zones"]["liste_ameliorations"]
+        x = int(self.cfg["params"].get("price_split_x", 0))
+        return x if z["x1"] < x < z["x2"] else 0
+
+    def _detect_symbol(self, band_rgb):
+        """Détecte le symbole de ressource dans la portion droite d'une ligne
+        (comptage de pixels par couleur). Retourne (symbole|None, comptages).
+
+        symbole ∈ {'or', 'elexir', 'elexir_noir'}. L'élixir noir (blob sombre)
+        n'est retenu que si ni or ni elexir ne ressortent, avec un seuil plus
+        haut pour ignorer les contours sombres des icônes."""
+        hsv = cv2.cvtColor(band_rgb, cv2.COLOR_RGB2HSV)
+        counts = {}
+        for name, (lo, hi) in self._SYMBOL_HSV_RANGES.items():
+            counts[name] = int(cv2.countNonZero(cv2.inRange(hsv, lo, hi)))
+        counts["elexir_noir"] = int(cv2.countNonZero(
+            cv2.inRange(hsv, (0, 0, 0), (179, 255, 70))))
+
+        min_px   = int(self.cfg["params"].get("symbol_min_pixels", 80))
+        min_dark = int(self.cfg["params"].get("symbol_min_pixels_dark", 250))
+        if counts["or"] >= min_px or counts["elexir"] >= min_px:
+            return ("or" if counts["or"] >= counts["elexir"] else "elexir"), counts
+        if counts["elexir_noir"] >= min_dark:
+            return "elexir_noir", counts
+        return None, counts
+
+    def read_upgrade_rows(self):
+        """Lit la liste des améliorations avec la barre verticale nom/prix.
+
+        À gauche de la barre : OCR binarisé des NOMS (lignes) + détection de
+        l'étiquette verte 'Nouv.' (nouveau bâtiment → pas une amélioration).
+        À droite, pour chaque ligne : OCR du PRIX (pixels blancs uniquement)
+        et détection du SYMBOLE de ressource par couleur.
+
+        Retourne (rows, image_rgb, (ox, oy)) — rows ordonnées de haut en bas :
+            {name, price, symbol, is_new, counts, click_x, click_y, top, bot}
+        Nécessite price_split_x configuré, sinon ([], None, (0, 0))."""
+        split_abs = self._split_x()
+        if not split_abs:
+            self.log("read_upgrade_rows : price_split_x non configuré.")
+            return [], None, (0, 0)
+
+        zone = self.cfg["zones"]["liste_ameliorations"]
+        raw, (ox, oy) = self._grab_color(zone)
+        if raw is None:
+            return [], None, (0, 0)
+        split = split_abs - ox
+        h = raw.shape[0]
+
+        # Noms : partie gauche binarisée (texte blanc)
+        left_gray = cv2.cvtColor(raw[:, :split], cv2.COLOR_BGR2GRAY)
+        _, left_bin = cv2.threshold(left_gray, 230, 255, cv2.THRESH_BINARY)
+        names = self._group_lines(self._reader.readtext(left_bin), ox, oy)
+
+        click_dx = int(self.cfg["params"].get("click_x_offset", 30))
+        click_dy = int(self.cfg["params"].get("click_y_offset", 0))
+        pad = 6
+
+        rows = []
+        for line in names:
+            y1b = max(0, int(line["top"] - oy) - pad)
+            y2b = min(h, int(line["bot"] - oy) + pad)
+            if y2b <= y1b:
+                continue
+            band = raw[y1b:y2b, split:]
+
+            # Prix : ne garder que les pixels quasi blancs (texte du prix),
+            # ce qui efface le symbole coloré et le fond.
+            white = cv2.inRange(band, (200, 200, 200), (255, 255, 255))
+            price_txt = " ".join(r[1] for r in self._reader.readtext(white))
+            price, _ = _extract_price(price_txt)
+
+            symbol, counts = self._detect_symbol(band)
+
+            # 'Nouv.' : pixels verts dans la partie NOM (du début du texte à
+            # la barre), à l'écart de l'icône du bâtiment (plus à gauche).
+            name_x1 = max(0, int(line["left"] - ox) - 10)
+            name_band = raw[y1b:y2b, name_x1:split]
+            hsv_name = cv2.cvtColor(name_band, cv2.COLOR_RGB2HSV)
+            counts["nouv"] = int(cv2.countNonZero(
+                cv2.inRange(hsv_name, *self._NEW_HSV_RANGE)))
+            is_new = (counts["nouv"] >=
+                      int(self.cfg["params"].get("new_min_pixels", 60))
+                      or "nouv" in line["text"].lower())
+
+            rows.append({
+                "name":    line["text"],
+                "price":   price,
+                "symbol":  symbol,
+                "is_new":  is_new,
+                "counts":  counts,
+                "click_x": int(line["left"] + click_dx),
+                "click_y": int((line["top"] + line["bot"]) / 2 + click_dy),
+                "top":     line["top"],
+                "bot":     line["bot"],
+            })
+        return rows, raw, (ox, oy)
+
+    def _save_rows_debug(self, rows, img_rgb, offset, highlight=None) -> None:
+        """Sauvegarde l'image couleur de la liste, annotée : barre verticale,
+        bandes de lignes et étiquette symbole/prix."""
+        if img_rgb is None:
+            return
+        try:
+            debug_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "debug_ocr")
+            os.makedirs(debug_dir, exist_ok=True)
+            ox, oy = offset
+            annotated = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+            split = self._split_x() - ox
+            if split > 0:
+                cv2.line(annotated, (split, 0), (split, annotated.shape[0]),
+                         (255, 0, 0), 2)
+            for row in rows:
+                y1 = max(0, int(row["top"] - oy))
+                y2 = max(0, int(row["bot"] - oy))
+                color = (0, 0, 255) if row is highlight else (0, 200, 0)
+                cv2.rectangle(annotated, (2, y1), (annotated.shape[1] - 3, y2),
+                              color, 1 + (row is highlight))
+                label = f"{row['symbol'] or '?'}:{row['price']}"
+                if row.get("is_new"):
+                    label += " NOUV"
+                cv2.putText(annotated, label,
+                            (split + 4, max(12, y1 + 14)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(debug_dir, f"rows_{ts}.png")
+            cv2.imwrite(path, annotated)
+            self.log(f"  → screenshot lignes sauvegardé : {path}")
+        except Exception as e:
+            self.log(f"  → erreur sauvegarde debug : {e}")
 
     # ---------- lectures ----------
 
@@ -308,6 +485,14 @@ class WallsUpgrader:
     # ---------- recherche / scroll ----------
 
     def _find_keyword_in_list(self, keyword: str):
+        """Cherche `keyword` dans la liste. Retourne (texte, prix, x, y) ou None.
+
+        Si la barre verticale nom/prix est configurée (price_split_x), le prix
+        est lu séparément à droite (pixels blancs) et le symbole par couleur ;
+        sinon, ancien mode : OCR pleine largeur, prix extrait du même texte."""
+        if self._split_x():
+            return self._find_keyword_split(keyword)
+
         keyword_l = keyword.lower()
         click_dx = int(self.cfg["params"].get("click_x_offset", 30))
         click_dy = int(self.cfg["params"].get("click_y_offset", 0))
@@ -333,6 +518,23 @@ class WallsUpgrader:
                      f"{line['top']}..{line['bot']}]")
             self._save_debug_image(img, line, (ox, oy), prix)
             return text, prix, int(cx), int(cy)
+        return None
+
+    def _find_keyword_split(self, keyword: str):
+        """Variante de la recherche utilisant la barre verticale nom/prix."""
+        keyword_l = keyword.lower()
+        rows, img, offset = self.read_upgrade_rows()
+        for row in rows:
+            if keyword_l not in row["name"].lower():
+                continue
+            c = row["counts"]
+            self.log(f"  ligne          : '{row['name']}'")
+            self.log(f"  symbole        : {row['symbol'] or '?'}  "
+                     f"(px or={c['or']} elexir={c['elexir']} noir={c['elexir_noir']})")
+            self.log(f"  prix (droite)  : {row['price']}")
+            self.log(f"  clic prévu     : ({row['click_x']}, {row['click_y']})")
+            self._save_rows_debug(rows, img, offset, highlight=row)
+            return row["name"], row["price"], row["click_x"], row["click_y"]
         return None
 
     def _save_debug_image(self, img, line, offset, prix) -> None:
