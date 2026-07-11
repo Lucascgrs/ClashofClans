@@ -41,9 +41,14 @@ from typing import Callable, Iterable, Optional
 # Emplacements & types
 # ---------------------------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ORCHESTRATION_DIR = os.path.join(BASE_DIR, "Orchestration")
-ACTIONS_DIR = os.path.join(BASE_DIR, "Actions")
+from ..paths import (
+    ORCHESTRATION_DIR as _ORCHESTRATION_DIR,
+    ACTIONS_DIR as _ACTIONS_DIR,
+    ORCHESTRATION_SETTINGS_FILE,
+)
+
+ORCHESTRATION_DIR = str(_ORCHESTRATION_DIR)
+ACTIONS_DIR = str(_ACTIONS_DIR)
 
 TASK_INVITE = "invite"
 TASK_ATTACK = "attack"
@@ -57,7 +62,7 @@ TYPE_ICONS = {
 
 LogCallback = Callable[[str], None]
 
-SETTINGS_FILE = os.path.join(ORCHESTRATION_DIR, "orchestration_settings.json")
+SETTINGS_FILE = ORCHESTRATION_SETTINGS_FILE
 DEFAULT_STOP_HOTKEY = "<f12>"
 
 
@@ -206,7 +211,7 @@ def list_action_files() -> list[str]:
 # ---------------------------------------------------------------------------
 
 def run_invite(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None:
-    import COC  # import paresseux : COC.py est lourd
+    from . import coc_api as COC  # import paresseux : coc_api est lourd
 
     filters = cfg.get("filters", {})
     for key, value in filters.items():
@@ -242,7 +247,7 @@ def run_invite(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
 
 
 def run_attack(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None:
-    import attack_session  # import paresseux
+    from . import attack_session  # import paresseux
 
     accounts = cfg.get("accounts", [])
     if not accounts:
@@ -265,7 +270,7 @@ def run_attack(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
 
 
 def run_playback(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None:
-    import playback  # import paresseux
+    from . import playback  # import paresseux
 
     fname = cfg.get("file")
     if not fname:

@@ -15,6 +15,8 @@ import time
 from pynput.mouse import Button, Controller as MouseController
 from pynput.keyboard import Key, Controller as KeyboardController
 
+from ..paths import ACTIONS_DIR as _ACTIONS_DIR
+
 
 # DPI awareness : sans ça, les coordonnées capturées peuvent être décalées
 # sur les écrans en mise à l'échelle.
@@ -31,7 +33,7 @@ def _set_dpi_awareness() -> None:
 _set_dpi_awareness()
 
 
-ACTIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Actions")
+ACTIONS_DIR = str(_ACTIONS_DIR)
 
 
 def actions_path(filename: str) -> str:

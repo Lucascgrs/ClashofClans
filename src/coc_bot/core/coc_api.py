@@ -37,7 +37,16 @@ import pytesseract
 import logging
 import threading
 from collections import deque
-from coc_token_manager import get_or_create_token
+from .token_manager import get_or_create_token
+from ..paths import (
+    COORDS_CONFIG_FILE as COORDS_FILE,
+    LOCATIONS_FILE,
+    FILE_ALL_CLANS,
+    FILE_ALL_PLAYERS,
+    FILE_EPF_PLAYERS,
+    FILE_GDC,
+    PLAYER_TAGS_FILE as FILE_PLAYER_TAGS,
+)
 
 # =============================================================================
 # CONFIG
@@ -63,7 +72,7 @@ FILTER_CONFIG = {
 }
 
 # --- CONFIGURATION COORDONNÉES ---
-COORDS_FILE = "coords_config.json"
+# COORDS_FILE / LOCATIONS_FILE / FILE_* proviennent de coc_bot.paths (chemins absolus).
 DEFAULT_COORDS = {
     "profil": [75, 62],
     "social": [1438, 91],
@@ -85,8 +94,6 @@ def load_coords():
 def save_coords(coords):
     with open(COORDS_FILE, 'w') as f:
         json.dump(coords, f, indent=4)
-
-LOCATIONS_FILE = "locations.json"
 
 def load_locations():
     """Charge les locations depuis le JSON local ou utilise le dict par défaut."""
@@ -157,13 +164,8 @@ LOCATIONS_MAP = {
     "Philippines": 32000183
 }
 
-# Fichiers de stockage
-# Les données volumineuses sont en .parquet ; les métadonnées restent en .xlsx
-FILE_ALL_CLANS      = "All_Clans.xlsx"       # référence de base (meta en xlsx)
-FILE_ALL_PLAYERS    = "All_Players.xlsx"     # référence de base (meta en xlsx)
-FILE_EPF_PLAYERS    = "EPF_Players.xlsx"
-FILE_GDC            = "gdc.xlsx"
-FILE_PLAYER_TAGS    = "player_tags.txt"
+# Fichiers de stockage — chemins absolus fournis par coc_bot.paths
+# (données volumineuses en .parquet ; métadonnées en .xlsx).
 
 META_SHEET          = "_meta"
 DATA_SHEET          = "data"

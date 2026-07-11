@@ -21,14 +21,10 @@ import os
 import time
 from typing import Callable, Iterable, Optional
 
-from playback import LecteurPosition
-from walls import WallsUpgrader
-from upgrades import UpgradesRunner
-
-
-ATTACK_CONFIG_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "attack_config.json"
-)
+from .playback import LecteurPosition
+from .walls import WallsUpgrader
+from .upgrades import UpgradesRunner
+from ..paths import ATTACK_CONFIG_FILE
 
 
 ATTACK_DEFAULT_CONFIG = {

@@ -17,9 +17,10 @@ import logging
 import os
 from dotenv import load_dotenv
 
-from env_setup import ensure_env
+from .env_setup import ensure_env
+from ..paths import ENV_FILE
 
-load_dotenv()  # Charge automatiquement le fichier .env
+load_dotenv(ENV_FILE)  # Charge automatiquement le fichier .env
 
 DEV_PORTAL = "https://developer.clashofclans.com/api"
 KEY_NAME   = "AutoKey"

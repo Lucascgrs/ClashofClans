@@ -21,9 +21,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv, dotenv_values
 
-# Emplacement du .env : toujours à côté de ce fichier (dossier ClashOfClans)
-BASE_DIR = Path(__file__).resolve().parent
-ENV_PATH = BASE_DIR / ".env"
+from ..paths import ENV_FILE
+
+# Emplacement du .env : dans le dossier de données (voir coc_bot.paths).
+ENV_PATH = Path(ENV_FILE)
 
 # Variables requises : clé -> (libellé affiché, champ masqué ?)
 REQUIRED_VARS = {
@@ -68,12 +69,11 @@ def _prompt_console(prefill: dict):
 
 
 def _prompt_gui(prefill: dict):
-    """Fenêtre Tkinter de saisie. Retourne {clé: valeur} ou None si annulé."""
+    """Fenêtre CustomTkinter de saisie. Retourne {clé: valeur} ou None si annulé."""
     try:
-        import tkinter as tk
-        from tkinter import ttk, messagebox
+        import customtkinter as ctk
     except Exception as exc:  # pragma: no cover - environnement sans affichage
-        logging.warning("[EnvSetup] Tkinter indisponible (%s), passage en mode console.", exc)
+        logging.warning("[EnvSetup] CustomTkinter indisponible (%s), passage en mode console.", exc)
         return _prompt_console(prefill)
 
     state = {"ok": False, "vars": {}}
@@ -81,7 +81,10 @@ def _prompt_gui(prefill: dict):
     entry_widgets = {}    # clé -> widget Entry
     secret_widgets = []
 
-    root = tk.Tk()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+
+    root = ctk.CTk()
     root.title("Configuration — Clash of Clans")
     root.resizable(False, False)
     try:
@@ -89,32 +92,31 @@ def _prompt_gui(prefill: dict):
     except Exception:
         pass
 
-    try:
-        ttk.Style(root).theme_use("clam")
-    except Exception:
-        pass
+    frm = ctk.CTkFrame(root, fg_color="transparent")
+    frm.grid(row=0, column=0, sticky="nsew", padx=24, pady=24)
 
-    frm = ttk.Frame(root, padding=20)
-    frm.grid(row=0, column=0, sticky="nsew")
-
-    ttk.Label(frm, text="Première configuration",
-              font=("Helvetica", 14, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
-    ttk.Label(
+    ctk.CTkLabel(
+        frm, text="Première configuration",
+        font=ctk.CTkFont(size=20, weight="bold"),
+    ).grid(row=0, column=0, columnspan=2, sticky="w")
+    ctk.CTkLabel(
         frm,
         text=("Renseignez vos identifiants du portail développeur Clash of Clans.\n"
               "Ils servent à générer automatiquement votre token API.\n"
               "Un fichier .env local sera créé (jamais partagé)."),
-        justify="left", foreground="#555",
-    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 14))
+        justify="left", text_color=("gray40", "gray65"),
+    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 18))
 
-    show_pwd = tk.BooleanVar(value=False)
+    show_pwd = ctk.BooleanVar(value=False)
 
     row = 2
     for key, (label, secret) in REQUIRED_VARS.items():
-        ttk.Label(frm, text=f"{label} :").grid(row=row, column=0, sticky="w", pady=4)
-        var = tk.StringVar(value=prefill.get(key, "") or "")
-        ent = ttk.Entry(frm, textvariable=var, width=34, show="•" if secret else "")
-        ent.grid(row=row, column=1, sticky="ew", pady=4, padx=(10, 0))
+        ctk.CTkLabel(frm, text=f"{label} :").grid(
+            row=row, column=0, sticky="w", pady=6, padx=(0, 10))
+        var = ctk.StringVar(value=prefill.get(key, "") or "")
+        ent = ctk.CTkEntry(frm, textvariable=var, width=280,
+                           show="•" if secret else "")
+        ent.grid(row=row, column=1, sticky="ew", pady=6)
         entries[key] = var
         entry_widgets[key] = ent
         if secret:
@@ -126,18 +128,22 @@ def _prompt_gui(prefill: dict):
             widget.configure(show="" if show_pwd.get() else "•")
 
     if secret_widgets:
-        ttk.Checkbutton(frm, text="Afficher le mot de passe",
-                        variable=show_pwd, command=_toggle).grid(
-            row=row, column=1, sticky="w", pady=(0, 10))
+        ctk.CTkCheckBox(frm, text="Afficher le mot de passe",
+                        variable=show_pwd, command=_toggle,
+                        onvalue=True, offvalue=False).grid(
+            row=row, column=1, sticky="w", pady=(0, 12))
         row += 1
+
+    error_lbl = ctk.CTkLabel(frm, text="", text_color=("#c0392b", "#ff6b6b"))
+    error_lbl.grid(row=row, column=0, columnspan=2, sticky="w")
+    row += 1
 
     def _submit(*_):
         vals = {k: v.get().strip() for k, v in entries.items()}
         missing = _missing_vars(vals)
         if missing:
             labels = ", ".join(REQUIRED_VARS[k][0] for k in missing)
-            messagebox.showwarning("Champs manquants",
-                                   f"Merci de renseigner : {labels}", parent=root)
+            error_lbl.configure(text=f"Merci de renseigner : {labels}")
             return
         state["ok"] = True
         state["vars"] = vals
@@ -147,10 +153,12 @@ def _prompt_gui(prefill: dict):
         state["ok"] = False
         root.destroy()
 
-    btns = ttk.Frame(frm)
-    btns.grid(row=row, column=0, columnspan=2, sticky="e", pady=(12, 0))
-    ttk.Button(btns, text="Annuler", command=_cancel).grid(row=0, column=0, padx=(0, 8))
-    ttk.Button(btns, text="Enregistrer", command=_submit).grid(row=0, column=1)
+    btns = ctk.CTkFrame(frm, fg_color="transparent")
+    btns.grid(row=row, column=0, columnspan=2, sticky="e", pady=(16, 0))
+    ctk.CTkButton(btns, text="Annuler", command=_cancel, width=100,
+                  fg_color="transparent", border_width=1,
+                  text_color=("gray20", "gray85")).grid(row=0, column=0, padx=(0, 8))
+    ctk.CTkButton(btns, text="Enregistrer", command=_submit, width=120).grid(row=0, column=1)
 
     root.bind("<Return>", _submit)
     root.bind("<Escape>", _cancel)
@@ -159,11 +167,6 @@ def _prompt_gui(prefill: dict):
     # Focus sur le premier champ vide (sinon le premier champ)
     first_empty = next((k for k in REQUIRED_VARS if not entries[k].get()), None)
     entry_widgets[first_empty or next(iter(REQUIRED_VARS))].focus_set()
-
-    try:
-        root.eval("tk::PlaceWindow . center")
-    except Exception:
-        pass
 
     root.mainloop()
     return state["vars"] if state["ok"] else None

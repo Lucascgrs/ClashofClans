@@ -26,16 +26,12 @@ import json
 import os
 import re
 
-from walls import WallsUpgrader
-
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-UPGRADES_CONFIG_FILE = os.path.join(BASE_DIR, "upgrades_config.json")
+from .walls import WallsUpgrader
+from ..paths import UPGRADES_CONFIG_FILE, UPGRADES_CONFIG_DIR as _UPGRADES_CONFIG_DIR
 
 # Dossier des configurations d'améliorations nommées (sélectionnables
 # par compte dans l'onglet Multi Compte).
-UPGRADES_CONFIG_DIR = os.path.join(BASE_DIR, "Configs", "Upgrades")
+UPGRADES_CONFIG_DIR = str(_UPGRADES_CONFIG_DIR)
 
 
 UPGRADES_DEFAULT_CONFIG = {

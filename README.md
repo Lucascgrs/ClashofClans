@@ -4,7 +4,12 @@ Automatisation de tâches répétitives sur **Clash of Clans** (PC, émulateur o
 recherche et invitation de joueurs via l'API Supercell, sessions d'attaques multi-comptes
 enregistrées, et amélioration en masse des remparts par OCR.
 
-Le tout est piloté depuis une interface graphique Tkinter (`COC_App.py`).
+Le tout est piloté depuis une interface graphique moderne **CustomTkinter**
+(thème sombre/clair, barre de navigation latérale), lancée par `python -m coc_bot`.
+
+Le code est organisé en package Python réutilisable (`src/coc_bot`) avec une
+séparation nette **logique métier** (`coc_bot.core`) / **interface**
+(`coc_bot.ui`), pour être facile à comprendre et à réadapter.
 
 ---
 
@@ -48,8 +53,12 @@ Le tout est piloté depuis une interface graphique Tkinter (`COC_App.py`).
 ```bash
 python -m venv venv
 venv\Scripts\activate
-pip install requests pandas pyarrow tqdm matplotlib pyautogui pyperclip ^
-            pynput pytesseract opencv-python dxcam easyocr numpy
+
+# Option A — installation du package (recommandé : fournit la commande `coc-bot`)
+pip install -e .
+
+# Option B — dépendances seules
+pip install -r requirements.txt
 ```
 
 Variables d'environnement attendues (dans `.env` à la racine du dossier) :
@@ -72,19 +81,30 @@ Pour reconfigurer manuellement : `python env_setup.py` (ou `--force`).
 ## Lancement
 
 ```bash
+python -m coc_bot          # recommandé
+# ou, après `pip install -e .` :
+coc-bot
+# ou, lanceur de compatibilité (sans installation) :
 python COC_App.py
 ```
 
-L'interface s'ouvre avec **5 onglets** :
+L'interface s'ouvre sur une **barre de navigation latérale** donnant accès aux
+écrans suivants (l'ancien système d'onglets a été remplacé) ; le gros bouton
+rouge **⛔ Arrêt d'urgence** et le sélecteur de thème (sombre/clair/système)
+restent toujours visibles en bas de la barre.
 
-| Onglet | Rôle |
+| Écran | Rôle |
 |---|---|
-| 🔎 **Scanner & Filtres** | Configure les filtres, sélectionne les pays, lance les scans de joueurs/clans, lance la recherche aléatoire + invitation |
-| 🎮 **Jeu & Automatisation** | Gestion des comptes, des macros, et lancement des sessions d'attaques. Option « rituel remparts toutes les N attaques » |
+| 🏠 **Accueil** | Vue d'ensemble (macros, comptes, état des configs) et accès rapides |
+| 🔎 **Scanner** | Filtres, sélection des pays, scans joueurs/clans, recherche aléatoire + invitation |
+| 🎮 **Jeu & Attaques** | Macros, enregistreur, gestion des comptes, sessions d'attaques + rituels (remparts / améliorations) |
 | 🧱 **Auto Remparts** | Configuration et lancement de l'amélioration automatique des remparts (OCR + clics) |
+| ⬆ **Auto Améliorations** | Amélioration du premier choix payable de la liste (or / élixir / élixir noir), configs nommées |
+| 👥 **Multi Compte** | Enchaînement de plusieurs comptes (switch → armée → attaques) avec rituel optionnel |
+| 🗂 **Orchestration** | Enchaînement / planification horaire de tâches, raccourci d'arrêt d'urgence |
 | 📊 **Données** | Visualisation des parquets scannés, export Excel |
 | 📝 **Tags Joueurs** | Édition manuelle de la liste de tags joueurs |
-| **Log** | Journal d'exécution |
+| 📜 **Journal** | Journal d'exécution global |
 
 ### Première utilisation
 
@@ -110,25 +130,46 @@ L'interface s'ouvre avec **5 onglets** :
    améliorer plus, améliorer or, valider or, améliorer élixir, valider élixir,
    clic neutre).
 
-4. **Lancer** : depuis l'onglet 🎮 pour une session d'attaques, depuis l'onglet
+4. **Lancer** : depuis l'écran 🎮 pour une session d'attaques, depuis l'écran
    🧱 pour le rituel remparts seul.
 
 ---
 
-## Architecture des fichiers
+## Architecture du projet
 
-### Code
+```
+ClashOfClans/
+├── COC_App.py            # lanceur de compatibilité (python COC_App.py)
+├── pyproject.toml        # packaging + commande console `coc-bot`
+├── requirements.txt
+├── .env.example
+├── Actions/              # macros JSON enregistrées (données)
+├── Configs/ Orchestration/  # configs nommées (générées)
+└── src/coc_bot/
+    ├── __main__.py       # `python -m coc_bot`
+    ├── paths.py          # chemins ABSOLUS centralisés (+ COC_BOT_DATA_DIR)
+    ├── core/             # logique métier (indépendante de l'UI)
+    │   ├── coc_api.py        # API Clash of Clans : scans, filtres, invitations, exports
+    │   ├── token_manager.py  # génération/rafraîchissement du token API Supercell
+    │   ├── env_setup.py      # configuration interactive du .env (CustomTkinter)
+    │   ├── playback.py       # LecteurPosition — rejeu de macros + DPI awareness
+    │   ├── recorder.py       # EnregistreurPosition — enregistre les macros
+    │   ├── walls.py          # WallsUpgrader — OCR + auto-remparts
+    │   ├── upgrades.py       # UpgradesRunner — auto-améliorations (1er choix)
+    │   ├── attack_session.py # run_attack_session() — session d'attaques multi-comptes
+    │   ├── multi_account.py  # run_multi_session() — enchaînement multi-comptes
+    │   └── orchestration.py  # enchaînement/planification + arrêt d'urgence
+    └── ui/               # interface CustomTkinter
+        ├── app.py            # fenêtre principale (nav latérale, log, arrêt d'urgence)
+        ├── theme.py          # couleurs, polices, espacement
+        ├── widgets.py        # cartes, journaux, assistants de capture, listes…
+        └── views/            # un écran par module (dashboard, scan, game, walls…)
+```
 
-| Fichier | Rôle |
-|---|---|
-| [`COC_App.py`](COC_App.py) | Interface graphique Tkinter (point d'entrée) |
-| [`COC.py`](COC.py) | Logique API Clash of Clans : scans, filtres, invitations, exports |
-| [`coc_token_manager.py`](coc_token_manager.py) | Génération et rafraîchissement automatique du token API Supercell |
-| [`playback.py`](playback.py) | `LecteurPosition` — rejeu de macros JSON souris/clavier, + DPI awareness |
-| [`RegisterActions.py`](RegisterActions.py) | `EnregistreurPosition` — enregistre les macros |
-| [`walls.py`](walls.py) | `WallsUpgrader` — OCR + automatisation de l'amélioration des remparts. Gère aussi `walls_config.json` |
-| [`attack_session.py`](attack_session.py) | `run_attack_session()` — orchestration d'une session d'attaques multi-comptes. Gère `attack_config.json` |
-| [`PlayActions.py`](PlayActions.py) | Shim de rétrocompatibilité — re-exporte les symboles des modules ci-dessus pour ne pas casser un ancien import |
+> **Réutilisation** : toute la logique vit dans `coc_bot.core` et ne dépend pas
+> de l'interface. On peut piloter le bot sans GUI, par ex.
+> `from coc_bot.core import attack_session`. Les chemins de données sont
+> centralisés dans `coc_bot.paths` (surchargeables via `COC_BOT_DATA_DIR`).
 
 ### Données et configuration
 
@@ -138,7 +179,7 @@ L'interface s'ouvre avec **5 onglets** :
 | `accounts_config.json` | Liste des comptes : nom, fichier switch, armées, flag `switch_army` |
 | `walls_config.json` | Coordonnées des zones OCR et des boutons pour l'auto-remparts, + paramètres (mot-clé, scroll, délais) |
 | `attack_config.json` | Fichiers d'action communs (clic neutre, lose, bateaux, élixir nuit) + délais entre étapes |
-| `coords_config.json` | Coordonnées des clics utilisés par le module d'invitation (`COC.py`) |
+| `coords_config.json` | Coordonnées des clics utilisés par le module d'invitation (`coc_bot.core.coc_api`) |
 | `locations.json` | Cache local des `locationId` Supercell (pays + régions) |
 | `player_tags.txt` | Liste de tags joueurs (édition manuelle) |
 | `All_Players.parquet`, `All_Clans.parquet` | Données scannées (générées) |

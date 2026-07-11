@@ -25,12 +25,10 @@ import pyautogui
 # coin de l'écran : le clic neutre est volontairement placé en haut-gauche.
 pyautogui.FAILSAFE = False
 
-import playback  # initialise le DPI awareness
+from . import playback  # initialise le DPI awareness
+from ..paths import WALLS_CONFIG_FILE, DEBUG_OCR_DIR
 
-
-WALLS_CONFIG_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "walls_config.json"
-)
+DEBUG_OCR_DIR = str(DEBUG_OCR_DIR)
 
 
 WALLS_DEFAULT_CONFIG = {
@@ -410,8 +408,7 @@ class WallsUpgrader:
         if img_rgb is None:
             return
         try:
-            debug_dir = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "debug_ocr")
+            debug_dir = DEBUG_OCR_DIR
             os.makedirs(debug_dir, exist_ok=True)
             ox, oy = offset
             annotated = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
@@ -543,9 +540,7 @@ class WallsUpgrader:
         if img is None:
             return
         try:
-            debug_dir = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "debug_ocr"
-            )
+            debug_dir = DEBUG_OCR_DIR
             os.makedirs(debug_dir, exist_ok=True)
             ox, oy = offset
             # Annotation : on dessine la bbox de la ligne (en coords relatives à l'image)

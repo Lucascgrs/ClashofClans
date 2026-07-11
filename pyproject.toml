@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coc-bot"
+version = "2.0.0"
+description = "Boîte à outils d'automatisation Clash of Clans (scan API, attaques multi-comptes, OCR remparts) avec interface CustomTkinter."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Lucas Congras" }]
+keywords = ["clash-of-clans", "automation", "bot", "ocr", "customtkinter"]
+
+dependencies = [
+    "customtkinter>=5.2",
+    "requests>=2.28",
+    "pandas>=1.5",
+    "pyarrow>=10.0",
+    "numpy>=1.23",
+    "python-dotenv>=1.0",
+    "pynput>=1.7",
+    "pyautogui>=0.9",
+    "pyperclip>=1.8",
+    "pytesseract>=0.3",
+    "opencv-python>=4.6",
+    "dxcam>=0.0.5",
+    "easyocr>=1.6",
+    "tqdm>=4.64",
+    "matplotlib>=3.6",
+    "pillow>=9.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "pytest"]
+
+[project.scripts]
+coc-bot = "coc_bot.ui:main"
+
+[project.urls]
+Homepage = "https://github.com/"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

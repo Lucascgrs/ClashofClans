@@ -1,14 +1,30 @@
 # Ignorer tout par défaut
 .idea
 .env
+.env.local
 *.parquet
 *.xlsx
 walls_config.json
 
+# Fichiers sensibles / personnels (ne jamais committer)
+accounts_config.json
+coords_config.json
+*_token.json
+
+# Artefacts Python / build / venv
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+debug_ocr/
+
 # Mais garder les répertoires (pour descendre dans l'arborescence)
 !Actions/
 
-# Ne pas ignorer les fichiers Python
+# Ne pas ignorer les fichiers Python ni l'exemple d'environnement
 !*.py
 !player_tags.txt
-__pycache__/
+!.env.example

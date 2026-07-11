@@ -25,16 +25,12 @@ import os
 import time
 from typing import Callable, Optional
 
-import attack_session
-from walls import WallsUpgrader
-from upgrades import UpgradesRunner
+from . import attack_session
+from .walls import WallsUpgrader
+from .upgrades import UpgradesRunner
+from ..paths import MULTI_CONFIG_DIR as _MULTI_CONFIG_DIR, MULTI_LAST_FILE
 
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MULTI_CONFIG_DIR = os.path.join(BASE_DIR, "Configs", "MultiCompte")
-
-# Dernière configuration utilisée (rechargée à l'ouverture de l'onglet)
-MULTI_LAST_FILE = os.path.join(BASE_DIR, "multi_account_config.json")
+MULTI_CONFIG_DIR = str(_MULTI_CONFIG_DIR)
 
 
 DEFAULT_ENTRY = {
