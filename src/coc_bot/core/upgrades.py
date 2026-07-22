@@ -47,9 +47,12 @@ UPGRADES_CONFIG_DIR = str(_UPGRADES_CONFIG_DIR)
 UPGRADES_DEFAULT_CONFIG = {
     "zones": {
         "elexir_noir": {"x1": 1515, "y1": 246, "x2": 1815, "y2": 287},
+        # ZONE (et non un point fixe) du bouton « Améliorer » : sa position
+        # DIFFÈRE selon le bâtiment → on la lit en OCR pour cliquer là où le
+        # mot « Améliorer » est réellement détecté.
+        "ameliorer":   {"x1": 800, "y1": 850, "x2": 1120, "y2": 960},
     },
     "buttons": {
-        "ameliorer": {"x": 960, "y": 900},
         "confirmer": {"x": 1150, "y": 700},
     },
     "params": {
@@ -74,9 +77,9 @@ UPGRADES_CONFIG_STEPS = [
     ("zones.elexir_noir",  "zone",
      "Zone ELEXIR NOIR",
      "Délimitez le rectangle autour du montant d'ÉLIXIR NOIR (ressource sombre, en haut à droite de l'écran)."),
-    ("buttons.ameliorer",  "point",
-     "Bouton AMÉLIORER (bâtiment)",
-     "Cliquez sur une amélioration dans la liste pour ouvrir l'écran du bâtiment, puis placez la souris sur le bouton 'Améliorer' et appuyez sur ENTRÉE."),
+    ("zones.ameliorer",    "zone",
+     "Zone du bouton AMÉLIORER (bâtiment)",
+     "Ouvrez l'écran d'un bâtiment (clic sur une amélioration de la liste). Délimitez un rectangle (coin HAUT-GAUCHE puis BAS-DROIT) ENGLOBANT le bouton « Améliorer », assez large pour couvrir sa position sur TOUS les bâtiments (elle varie). Le bot lit « Améliorer » en OCR dans cette zone et clique dessus."),
     ("buttons.confirmer",  "point",
      "Bouton CONFIRMER (bâtiment)",
      "Sur l'écran de confirmation de l'amélioration, placez la souris sur le bouton de confirmation (celui qui affiche le prix) et appuyez sur ENTRÉE."),
@@ -201,11 +204,50 @@ class UpgradesRunner(WallsUpgrader):
             raise KeyError(f"Bouton non configuré (upgrades) : {key}")
         self._click_xy(b["x"], b["y"], delay=delay)
 
+    def _find_ameliorer(self):
+        """Localise le bouton « Améliorer » dans la zone configurée via OCR.
+
+        Le bouton se trouve à une position DIFFÉRENTE selon le bâtiment : on lit
+        donc le mot « Améliorer » dans la zone `zones.ameliorer` et on renvoie
+        les coordonnées ABSOLUES (x, y) de son centre, ou None si non trouvé."""
+        zone = self.ucfg["zones"].get("ameliorer")
+        if not zone or zone.get("x2", 0) <= zone.get("x1", 0):
+            raise KeyError("Zone 'ameliorer' non configurée "
+                           "(assistant onglet Améliorations).")
+        img, (ox, oy) = self._grab(zone)  # binarisé : texte blanc du bouton
+        if img is None:
+            self.log("  ⚠ Capture de la zone 'Améliorer' impossible.")
+            return None
+        lines = self._group_lines(self._readtext(img, "ameliorer"), ox, oy)
+        for line in lines:
+            if "amelior" in normalize_upgrade_name(line["text"]):
+                cx = int((line["left"] + line["right"]) / 2)
+                cy = int((line["top"] + line["bot"]) / 2)
+                self.log(f"  → « Améliorer » localisé à ({cx}, {cy}) "
+                         f": '{line['text']}'")
+                return cx, cy
+        lus = " | ".join(l["text"] for l in lines) or "(rien)"
+        self.log(f"  ⚠ « Améliorer » non lu dans la zone. Texte OCR : {lus}")
+        return None
+
+    def _click_ameliorer_zone(self, delay=None) -> None:
+        """Lit la zone « Améliorer » et clique sur le mot détecté. À défaut
+        (OCR muet), clique au CENTRE de la zone comme repli."""
+        found = self._find_ameliorer()
+        if found is None:
+            zone = self.ucfg["zones"]["ameliorer"]
+            cx = (int(zone["x1"]) + int(zone["x2"])) // 2
+            cy = (int(zone["y1"]) + int(zone["y2"])) // 2
+            self.log(f"  → repli : clic au centre de la zone ({cx}, {cy}).")
+            found = (cx, cy)
+        self._click_xy(found[0], found[1], delay=delay)
+
     def _do_building_upgrade(self, click_x: int, click_y: int) -> None:
-        """Processus bâtiment : ligne → 'Améliorer' → 'Confirmer' → neutre."""
-        self.log("→ Clic ligne, bouton 'Améliorer', bouton 'Confirmer'")
+        """Processus bâtiment : ligne → 'Améliorer' (localisé par OCR) →
+        'Confirmer' → neutre."""
+        self.log("→ Clic ligne, bouton 'Améliorer' (OCR), bouton 'Confirmer'")
         self._click_xy(click_x, click_y, delay=self.cfg["params"]["delay_open_menu"])
-        self._click_ubutton("ameliorer", delay=self.cfg["params"]["delay_validate"])
+        self._click_ameliorer_zone(delay=self.cfg["params"]["delay_validate"])
         self._click_ubutton("confirmer", delay=self.cfg["params"]["delay_validate"])
         self._click_button("clic_neutre")
         self._sleep(self.cfg["params"]["delay_click"])

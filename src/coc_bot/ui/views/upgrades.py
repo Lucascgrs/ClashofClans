@@ -79,7 +79,9 @@ class UpgradesView(BaseView):
             params.body,
             "Choisit la PREMIÈRE amélioration lisible dont la ressource (couleur du\n"
             "symbole) est cochée et payable, puis : clic ligne → « Améliorer » →\n"
-            "« Confirmer ». Zones/scroll/séparateur : partagés avec l'onglet Auto Remparts."
+            "« Confirmer ». Le bouton « Améliorer » est LOCALISÉ PAR OCR dans sa\n"
+            "zone (sa position change selon le bâtiment). Zones/scroll/séparateur\n"
+            "de la liste : partagés avec l'onglet Auto Remparts."
         ).grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
         # --- Exclusions ------------------------------------------------
@@ -101,7 +103,8 @@ class UpgradesView(BaseView):
         conf.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         r1 = ctk.CTkFrame(conf.body, fg_color="transparent")
         r1.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(r1, text="⚙ Définir zone élixir noir + boutons", command=self._wizard
+        ctk.CTkButton(r1, text="⚙ Définir zones (élixir noir, Améliorer) + Confirmer",
+                      command=self._wizard
                       ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
         ctk.CTkButton(r1, text="📋 Config actuelle", command=self._show_config
                       ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
@@ -126,6 +129,8 @@ class UpgradesView(BaseView):
         ctk.CTkButton(arow, text="🔍 Tester OCR ressources", command=self._test_ocr
                       ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
         ctk.CTkButton(arow, text="📃 Tester lecture liste", command=self._test_rows
+                      ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
+        ctk.CTkButton(arow, text="🔎 Tester zone Améliorer", command=self._test_ameliorer
                       ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
         ctk.CTkButton(arow, text="⬆ LANCER", command=self._run,
                       fg_color=theme.SUCCESS, hover_color=theme.ACCENT_HOVER
@@ -295,6 +300,26 @@ class UpgradesView(BaseView):
                 self._log("--- Fin lecture ---")
             except Exception as e:
                 self._log(f"Erreur lecture liste : {e}")
+        threading.Thread(target=task, daemon=True).start()
+
+    def _test_ameliorer(self):
+        def task():
+            try:
+                self._save_params()
+                runner = upgrades.UpgradesRunner(log_callback=self._log)
+                self._log("--- Test zone « Améliorer » "
+                          "(ouvrez d'abord l'écran d'un bâtiment) ---")
+                found = runner._find_ameliorer()
+                if found:
+                    self._log(f"✅ « Améliorer » localisé à {found} — "
+                              "le bot cliquerait ici.")
+                else:
+                    self._log("❌ « Améliorer » non localisé. Élargissez la zone "
+                              "(assistant) ou activez « Debug OCR » pour voir la "
+                              "capture filtrée.")
+                self._log("--- Fin test ---")
+            except Exception as e:
+                self._log(f"Erreur test zone Améliorer : {e}")
         threading.Thread(target=task, daemon=True).start()
 
     def _run(self):
