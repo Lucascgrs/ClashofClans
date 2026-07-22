@@ -11,7 +11,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from ... import paths
-from ...core import attack_session, orchestration, playback, recorder
+from ...core import attack_session, orchestration, playback, recorder, upgrades
 from .. import theme
 from ..base_view import BaseView
 from ..widgets import Card, SelectList, Dialog, ask_string, hint_label
@@ -141,8 +141,18 @@ class GameView(BaseView):
         ctk.CTkEntry(u, textvariable=self.v_upg_every, width=56).pack(side="left", padx=6)
         ctk.CTkLabel(u, text="attaques (config : écran Améliorations)").pack(side="left")
 
+        # Action à rejouer après CHAQUE attaque (sortie de situation, coffres…)
+        self.v_after_enabled = tk.BooleanVar(value=False)
+        self.v_after_file = tk.StringVar()
+        aa = ctk.CTkFrame(atk.body, fg_color="transparent")
+        aa.grid(row=7, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+        ctk.CTkCheckBox(aa, text="Effectuer cette action après chaque attaque :",
+                        variable=self.v_after_enabled).pack(side="left")
+        self.cb_after = ctk.CTkComboBox(aa, variable=self.v_after_file, values=[], width=240)
+        self.cb_after.pack(side="left", padx=6)
+
         run = ctk.CTkFrame(atk.body, fg_color="transparent")
-        run.grid(row=7, column=0, sticky="ew", pady=(theme.PAD, 0))
+        run.grid(row=8, column=0, sticky="ew", pady=(theme.PAD, 0))
         ctk.CTkButton(run, text="⚔ LANCER LA SESSION D'ATTAQUE", command=self._run_attack,
                       fg_color=theme.SUCCESS, hover_color=theme.ACCENT_HOVER, height=42
                       ).pack(side="left", padx=(0, theme.PAD_S))
@@ -161,6 +171,7 @@ class GameView(BaseView):
         self.macro_list.set_items(files)
         self.cb_strat_main.configure(values=files)
         self.cb_strat_night.configure(values=files)
+        self.cb_after.configure(values=files)
 
     def _play_selected(self):
         fname = self.macro_list.selected_one()
@@ -326,6 +337,12 @@ class GameView(BaseView):
         upg_every = int(self.v_upg_every.get()) if self.v_upg_enabled.get() else 0
         return walls_every, upg_every
 
+    def _after_attack_file(self):
+        """Macro à rejouer après chaque attaque (« » si l'option est décochée)."""
+        if self.v_after_enabled.get():
+            return self.v_after_file.get().strip()
+        return ""
+
     # =====================================================================
     # Lancement / orchestration
     # =====================================================================
@@ -344,6 +361,7 @@ class GameView(BaseView):
         nb_atk, nb_night = self.v_nb_atk.get(), self.v_nb_night.get()
         strat_night = self.v_strat_night.get()
         walls_every, upg_every = self._rituals()
+        after_atk = self._after_attack_file()
         stop_event = threading.Event()
 
         def task():
@@ -352,11 +370,14 @@ class GameView(BaseView):
                 self.app.log(f"Rituel remparts activé : toutes les {walls_every} attaques.")
             if upg_every > 0:
                 self.app.log(f"Rituel améliorations activé : toutes les {upg_every} attaques.")
+            if after_atk:
+                self.app.log(f"Action après chaque attaque : {after_atk}")
             try:
                 attack_session.run_attack_session(
                     accounts, attaques=nb_atk, attaques_night=nb_night,
                     strategy_file=strat, night_strategy_file=strat_night,
                     walls_every=walls_every, upgrades_every=upg_every,
+                    after_attack_file=after_atk or None,
                     log_callback=self.app.log, walls_log_callback=self.app.log,
                     stop_event=stop_event)
             except Exception as e:
@@ -381,7 +402,13 @@ class GameView(BaseView):
             "attaques_night": self.v_nb_night.get(), "strategy_file": strat,
             "night_strategy_file": self.v_strat_night.get(),
             "walls_every": walls_every, "upgrades_every": upg_every,
+            "after_attack_file": self._after_attack_file(),
         }
+        # Instantané de la config d'améliorations (dont la liste d'exclusion)
+        # figé au moment de l'enregistrement : l'orchestration réutilisera
+        # EXACTEMENT ces paramètres, même si l'écran Améliorations change ensuite.
+        if upg_every > 0:
+            cfg["upgrades_config"] = upgrades.load_upgrades_config()
         name = ask_string(self, "Nom de la configuration",
                           "Nom du fichier de configuration (sans .json) :", "attaque")
         if not name:

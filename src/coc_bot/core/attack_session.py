@@ -101,18 +101,26 @@ def run_attack_session(
     night_strategy_file: Optional[str] = None,
     walls_every: int = 0,
     upgrades_every: int = 0,
+    after_attack_file: Optional[str] = None,
+    upgrades_config: Optional[dict] = None,
     log_callback: Optional[LogCallback] = None,
     walls_log_callback: Optional[LogCallback] = None,
     stop_event=None,
 ) -> None:
     """Lance la session d'attaques sur les comptes fournis.
 
-    `walls_every`    : si > 0, lance WallsUpgrader.run() toutes les N attaques
-                       (défaites + jour + nuit confondues).
-    `upgrades_every` : si > 0, lance UpgradesRunner.run() (premiers choix de la
-                       liste d'améliorations) toutes les N attaques. Exclusif
-                       de `walls_every` côté GUI, mais les deux compteurs sont
-                       indépendants ici.
+    `walls_every`      : si > 0, lance WallsUpgrader.run() toutes les N attaques
+                         (jour + nuit confondues).
+    `upgrades_every`   : si > 0, lance UpgradesRunner.run() (premiers choix de la
+                         liste d'améliorations) toutes les N attaques. Exclusif
+                         de `walls_every` côté GUI, mais les deux compteurs sont
+                         indépendants ici.
+    `after_attack_file`: si défini, macro rejouée APRÈS chaque attaque (jour et
+                         nuit) — utile pour sortir d'une situation, ouvrir des
+                         coffres de récompense, etc.
+    `upgrades_config`  : instantané de la config d'améliorations (dict) figé au
+                         moment de l'enregistrement de l'orchestration ; None =
+                         config active de l'écran Améliorations.
     """
     log: LogCallback = log_callback or print
     cfg = load_attack_config()
@@ -121,6 +129,11 @@ def run_attack_session(
 
     neutral = actions.get("neutral_click")
     counters = {"walls": 0, "upgrades": 0}
+
+    def _after_attack() -> None:
+        """Rejoue la macro « après chaque attaque » si elle est configurée."""
+        if after_attack_file:
+            _play(after_attack_file)
 
     def _stop() -> bool:
         return stop_event is not None and stop_event.is_set()
@@ -154,7 +167,8 @@ def run_attack_session(
                 _isleep(delays.get("before_walls_ritual", 1.5))
                 try:
                     UpgradesRunner(log_callback=walls_log_callback or log,
-                                   stop_event=stop_event).run()
+                                   stop_event=stop_event,
+                                   config_data=upgrades_config).run()
                 except Exception as e:
                     log(f"Erreur rituel améliorations : {e}")
 
@@ -190,6 +204,7 @@ def run_attack_session(
                 _play(strategy_file)
                 _isleep(delays["after_attack"])
                 _play(neutral)
+                _after_attack()
                 _maybe_walls()
 
         # Phase attaques nuit — passage au village de la nuit via la macro du
@@ -208,6 +223,7 @@ def run_attack_session(
                     _play(neutral)
                     _isleep(delays["after_night_attack"])
                     _play(actions.get("night_elexir"))  # facultatif
+                    _after_attack()
                     _maybe_walls()
             finally:
                 # On ne reste JAMAIS sur le village de la nuit : retour principal

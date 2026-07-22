@@ -10,7 +10,8 @@ Chaque compte est décrit par une entrée :
         "nb_attacks":      10,                           # attaques avec ce compte
         "ritual":          "none",                       # "none" | "walls" | "upgrades" (exclusif)
         "ritual_every":    5,                            # rituel toutes les N attaques
-        "upgrades_config": ""                            # config nommée (si ritual = "upgrades")
+        "upgrades_config": "",                           # config nommée (si ritual = "upgrades")
+        "after_attack_file": ""                          # macro rejouée après CHAQUE attaque ("" = aucune)
     }
 
 La configuration générale {"loop": bool, "entries": [...]} s'enregistre /
@@ -42,6 +43,7 @@ DEFAULT_ENTRY = {
     "ritual":          "none",
     "ritual_every":    5,
     "upgrades_config": "",
+    "after_attack_file": "",
 }
 
 RITUAL_LABELS = {
@@ -152,11 +154,14 @@ def run_multi_session(
             nb = int(entry.get("nb_attacks", 0))
             every = int(entry.get("ritual_every", 0))
             do_ritual = entry.get("ritual", "none") != "none" and every > 0
+            after_attack_file = entry.get("after_attack_file") or ""
             if not attack_file or nb <= 0:
                 log(f"[{name}] pas d'attaque configurée.")
                 continue
 
             log(f"[{name}] {nb} attaque(s) avec {attack_file}…")
+            if after_attack_file:
+                log(f"[{name}] action après chaque attaque : {after_attack_file}")
             counter = 0
             for i in range(nb):
                 if _stop():
@@ -165,6 +170,8 @@ def run_multi_session(
                 attack_session._play(attack_file)
                 _isleep(delays["after_attack"])
                 attack_session._play(neutral)
+                if after_attack_file:
+                    attack_session._play(after_attack_file)
                 counter += 1
                 if do_ritual and counter >= every:
                     counter = 0

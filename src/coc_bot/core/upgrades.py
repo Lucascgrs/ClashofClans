@@ -63,6 +63,7 @@ UPGRADES_DEFAULT_CONFIG = {
         "scroll_amount":     -210, # intensité du scroll (négatif = vers le bas)
         "debug_ocr":         False,# enregistre les captures filtrées vues par l'OCR
         "exclude_list":      [],   # noms d'améliorations à NE JAMAIS lancer
+        "place_new_building": False,# autorise le placement d'un nouveau bâtiment (« Nouv. »)
     },
 }
 
@@ -86,6 +87,14 @@ def _deep_copy(d):
     return json.loads(json.dumps(d))
 
 
+def _merge_config(data: dict) -> dict:
+    """Fusionne un dict de config (partiel) avec les valeurs par défaut."""
+    cfg = _deep_copy(UPGRADES_DEFAULT_CONFIG)
+    for section in ("zones", "buttons", "params"):
+        cfg.setdefault(section, {}).update((data or {}).get(section, {}))
+    return cfg
+
+
 def load_upgrades_config(path: str = None) -> dict:
     """Charge une config d'améliorations. `path` permet de charger une
     configuration nommée (Configs/Upgrades/xxx.json) ; défaut : la config
@@ -100,10 +109,7 @@ def load_upgrades_config(path: str = None) -> dict:
     except Exception as e:
         print(f"[UpgradesConfig] Erreur lecture : {e}")
         return _deep_copy(UPGRADES_DEFAULT_CONFIG)
-    cfg = _deep_copy(UPGRADES_DEFAULT_CONFIG)
-    for section in ("zones", "buttons", "params"):
-        cfg.setdefault(section, {}).update(data.get(section, {}))
-    return cfg
+    return _merge_config(data)
 
 
 def save_upgrades_config(cfg: dict, path: str = None) -> str:
@@ -136,13 +142,20 @@ class UpgradesRunner(WallsUpgrader):
     RESOURCES = ("or", "elexir", "elexir_noir")
 
     def __init__(self, log_callback=None, stop_event=None,
-                 config_file: str = None) -> None:
+                 config_file: str = None, config_data: dict = None) -> None:
         """`config_file` : configuration nommée (Configs/Upgrades/xxx.json) ;
-        None = config active (upgrades_config.json)."""
+        `config_data` : instantané de configuration déjà chargé (prioritaire) —
+        utilisé par l'orchestration qui embarque la config d'améliorations au
+        moment de l'enregistrement (liste d'exclusion figée) ;
+        None/None = config active (upgrades_config.json)."""
         super().__init__(log_callback=log_callback, stop_event=stop_event)
-        self.ucfg = load_upgrades_config(config_file)
-        if config_file:
-            self.log(f"[Upgrades] Config chargée : {config_file}")
+        if config_data is not None:
+            self.ucfg = _merge_config(config_data)
+            self.log("[Upgrades] Config embarquée (instantané orchestration).")
+        else:
+            self.ucfg = load_upgrades_config(config_file)
+            if config_file:
+                self.log(f"[Upgrades] Config chargée : {config_file}")
         # Scroll propre à cette automatisation : surcharge les valeurs
         # héritées de walls_config pour _scroll_list / max_scrolls.
         self.cfg["params"]["max_scrolls"]   = int(self.ucfg["params"].get("max_scrolls", 8))
@@ -155,6 +168,9 @@ class UpgradesRunner(WallsUpgrader):
         self._excludes = [normalize_upgrade_name(e)
                           for e in self.ucfg["params"].get("exclude_list", [])
                           if normalize_upgrade_name(e)]
+        # Placement d'un nouveau bâtiment (« Nouv. ») : option non encore
+        # implémentée — le flag est lu et conservé pour un usage futur.
+        self.place_new_building = bool(self.ucfg["params"].get("place_new_building", False))
 
     # ---------- lectures ----------
 

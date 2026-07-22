@@ -191,7 +191,7 @@ class MultiView(BaseView):
         named_cfgs = [""] + upgrades.list_named_configs()
 
         dlg = Dialog(self, "Nouveau compte" if is_new else f"Édition — {entry.get('name', '')}",
-                     width=520, height=520)
+                     width=520, height=620)
         wrap = ctk.CTkFrame(dlg, fg_color="transparent")
         wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
         wrap.columnconfigure(1, weight=1)
@@ -204,6 +204,8 @@ class MultiView(BaseView):
         v_ritual = tk.StringVar(value=entry["ritual"])
         v_every  = tk.IntVar(value=int(entry["ritual_every"]))
         v_ucfg   = tk.StringVar(value=entry["upgrades_config"])
+        v_after_enabled = tk.BooleanVar(value=bool(entry.get("after_attack_file")))
+        v_after_file    = tk.StringVar(value=entry.get("after_attack_file", ""))
 
         def label(r, text):
             ctk.CTkLabel(wrap, text=text, anchor="w").grid(row=r, column=0, sticky="w", pady=6, padx=(0, theme.PAD_S))
@@ -243,6 +245,22 @@ class MultiView(BaseView):
                      font=theme.font_small(), text_color=theme.MUTED).grid(row=4, column=0, sticky="w")
         update_ritual_state()
 
+        # --- Action après chaque attaque -------------------------------
+        after = Card(wrap, title="Après chaque attaque")
+        after.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
+        cb_after = ctk.CTkComboBox(after.body, variable=v_after_file, values=action_files, width=260)
+
+        def update_after_state():
+            cb_after.configure(state="normal" if v_after_enabled.get() else "disabled")
+
+        ctk.CTkCheckBox(after.body, text="Effectuer cette action après chaque attaque",
+                        variable=v_after_enabled, command=update_after_state
+                        ).grid(row=0, column=0, sticky="w")
+        cb_after.grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
+        ctk.CTkLabel(after.body, text="(ex. ouvrir un coffre, sortir d'une situation)",
+                     font=theme.font_small(), text_color=theme.MUTED).grid(row=2, column=0, sticky="w")
+        update_after_state()
+
         def save_and_close():
             name = v_name.get().strip()
             if not name:
@@ -257,6 +275,8 @@ class MultiView(BaseView):
                 "nb_attacks": max(0, int(v_nb.get())), "ritual": v_ritual.get(),
                 "ritual_every": max(1, int(v_every.get())),
                 "upgrades_config": v_ucfg.get().strip(),
+                "after_attack_file": (v_after_file.get().strip()
+                                      if v_after_enabled.get() else ""),
             }
             if is_new:
                 self.entries.append(new_entry)

@@ -38,6 +38,7 @@ class UpgradesView(BaseView):
         self.v_scrolls = tk.IntVar(value=int(p.get("max_scrolls", 8)))
         self.v_scamt  = tk.IntVar(value=int(p.get("scroll_amount", -210)))
         self.v_debug  = tk.BooleanVar(value=bool(p.get("debug_ocr", False)))
+        self.v_place_new = tk.BooleanVar(value=bool(p.get("place_new_building", False)))
 
         # --- Types autorisés -------------------------------------------
         types = Card(body, title="Types d'améliorations autorisés")
@@ -48,6 +49,13 @@ class UpgradesView(BaseView):
         ctk.CTkCheckBox(trow, text="🟣 Élixir", variable=self.v_elexir).pack(side="left", padx=(0, theme.PAD))
         ctk.CTkCheckBox(trow, text="⚫ Élixir noir", variable=self.v_noir).pack(side="left", padx=(0, theme.PAD))
         ctk.CTkCheckBox(trow, text="🧱 Inclure remparts", variable=self.v_remp).pack(side="left")
+        nrow = ctk.CTkFrame(types.body, fg_color="transparent")
+        nrow.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+        ctk.CTkCheckBox(
+            nrow, variable=self.v_place_new,
+            text="🏗 Autoriser le placement d'un nouveau bâtiment (« Nouv. »)").pack(side="left")
+        ctk.CTkLabel(nrow, text="(bientôt)", font=theme.font_small(),
+                     text_color=theme.MUTED).pack(side="left", padx=(theme.PAD_S, 0))
 
         # --- Paramètres ------------------------------------------------
         params = Card(body, title="Paramètres")
@@ -168,6 +176,7 @@ class UpgradesView(BaseView):
             "max_scrolls": max(0, int(self.v_scrolls.get())),
             "scroll_amount": int(self.v_scamt.get()),
             "debug_ocr": bool(self.v_debug.get()),
+            "place_new_building": bool(self.v_place_new.get()),
             "exclude_list": [ln.strip() for ln
                              in self.txt_exclude.get("1.0", "end-1c").splitlines()
                              if ln.strip()],
@@ -185,6 +194,7 @@ class UpgradesView(BaseView):
         self.v_scrolls.set(int(p.get("max_scrolls", 8)))
         self.v_scamt.set(int(p.get("scroll_amount", -210)))
         self.v_debug.set(bool(p.get("debug_ocr", False)))
+        self.v_place_new.set(bool(p.get("place_new_building", False)))
         self.txt_exclude.delete("1.0", "end")
         self.txt_exclude.insert("1.0", "\n".join(p.get("exclude_list", []) or []))
 
