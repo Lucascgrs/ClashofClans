@@ -415,7 +415,6 @@ class WallsUpgrader:
         click_dx = int(self.cfg["params"].get("click_x_offset", 30))
         click_dy = int(self.cfg["params"].get("click_y_offset", 0))
         new_min = int(self.cfg["params"].get("new_min_pixels", 60))
-        progress_min = int(self.cfg["params"].get("progress_min_pixels", 200))
         pad = 6
 
         rows = []
@@ -457,10 +456,12 @@ class WallsUpgrader:
             counts["price_white"] = price_white
             counts["price_red"] = price_red
 
-            # Amélioration EN COURS : barre de progression verte dans la bande
-            # droite (prix) OU un temps affiché à la place du prix. À écarter :
-            # la ligne n'est pas une amélioration lançable.
-            in_progress = (counts.get("progress", 0) >= progress_min) or time_like
+            # Amélioration EN COURS : on se fie au TEMPS affiché (H/J/MIN) à la
+            # place du prix. Le comptage de vert (barre de progression) est
+            # TROMPEUR sur les villages à fond herbeux : l'herbe verte transparaît
+            # sous la liste et gonfle le compteur bien au-delà d'une vraie barre
+            # (observé jusqu'à ~770 px d'herbe). Le temps, lui, est fiable.
+            in_progress = time_like
 
             # 'Nouv.' (nouveau bâtiment) : un libellé VERT « Nouv. » précède le
             # nom. On OCR les pixels verts À GAUCHE du nom et on cherche « nouv ».

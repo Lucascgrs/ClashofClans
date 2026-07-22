@@ -74,6 +74,20 @@ class UpgradesView(BaseView):
             "« Confirmer ». Zones/scroll/séparateur : partagés avec l'onglet Auto Remparts."
         ).grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
+        # --- Exclusions ------------------------------------------------
+        excl = Card(body, title="Améliorations à exclure",
+                    subtitle="Une par ligne. Ces améliorations ne seront jamais lancées.")
+        excl.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
+        excl.body.rowconfigure(0, weight=1)
+        self.txt_exclude = ctk.CTkTextbox(excl.body, height=90, font=theme.font_mono())
+        self.txt_exclude.grid(row=0, column=0, sticky="nsew")
+        self.txt_exclude.insert("1.0", "\n".join(p.get("exclude_list", []) or []))
+        hint_label(
+            excl.body,
+            "Comparaison SANS casse, SANS accents et SANS espaces des deux côtés.\n"
+            "Ex. « Rempart » (ou « rempart ») exclut « Rempart x68 »."
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+
         # --- Configuration ---------------------------------------------
         conf = Card(body, title="Configuration des coordonnées (spécifiques)")
         conf.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
@@ -154,6 +168,9 @@ class UpgradesView(BaseView):
             "max_scrolls": max(0, int(self.v_scrolls.get())),
             "scroll_amount": int(self.v_scamt.get()),
             "debug_ocr": bool(self.v_debug.get()),
+            "exclude_list": [ln.strip() for ln
+                             in self.txt_exclude.get("1.0", "end-1c").splitlines()
+                             if ln.strip()],
         })
         return cfg
 
@@ -168,6 +185,8 @@ class UpgradesView(BaseView):
         self.v_scrolls.set(int(p.get("max_scrolls", 8)))
         self.v_scamt.set(int(p.get("scroll_amount", -210)))
         self.v_debug.set(bool(p.get("debug_ocr", False)))
+        self.txt_exclude.delete("1.0", "end")
+        self.txt_exclude.insert("1.0", "\n".join(p.get("exclude_list", []) or []))
 
     def _save_params(self):
         cfg = self._collect_params()
@@ -241,13 +260,20 @@ class UpgradesView(BaseView):
                     self._log("Aucune ligne lue. La liste est-elle ouverte ? "
                               "Séparateur X configuré (onglet Auto Remparts) ?")
                     return
-                for row in rows:
+                n = len(rows)
+                skip_last = n > 5  # cf. _upgrade_first_possible : dernière ligne coupée
+                for i, row in enumerate(rows):
                     c = row["counts"]
                     flag = ""
+                    if skip_last and i == n - 1:
+                        flag += "  ✂ DERNIÈRE LIGNE (ignorée : liste > 5)"
                     if row.get("in_progress"):
                         flag += "  ⏳ EN COURS"
                     if row.get("is_new"):
                         flag += "  ⚠ NOUV."
+                    nm = upgrades.normalize_upgrade_name(row["name"])
+                    if any(e in nm for e in runner._excludes):
+                        flag += "  🚫 EXCLU"
                     flag += "  ✅ payable" if row.get("affordable") else "  ❌ trop cher"
                     self._log(
                         f"  '{row['name']}' | {row['symbol'] or '?'} | {row['price']}{flag}"

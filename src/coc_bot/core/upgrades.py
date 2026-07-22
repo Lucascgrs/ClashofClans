@@ -25,9 +25,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 
 from .walls import WallsUpgrader
 from ..paths import UPGRADES_CONFIG_FILE, UPGRADES_CONFIG_DIR as _UPGRADES_CONFIG_DIR
+
+
+def normalize_upgrade_name(s: str) -> str:
+    """Normalise un nom d'amélioration pour comparaison : minuscules, SANS
+    accents et SANS espaces. Appliqué des DEUX côtés (nom OCR et liste
+    d'exclusion) pour une comparaison robuste à la casse, aux accents et aux
+    espaces parasites de l'OCR (« Grand gar dien » ≈ « grand gardien »)."""
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii")
+    return "".join(s.lower().split())
 
 # Dossier des configurations d'améliorations nommées (sélectionnables
 # par compte dans l'onglet Multi Compte).
@@ -52,6 +62,7 @@ UPGRADES_DEFAULT_CONFIG = {
         "max_scrolls":       8,    # scrolls max pour cette automatisation
         "scroll_amount":     -210, # intensité du scroll (négatif = vers le bas)
         "debug_ocr":         False,# enregistre les captures filtrées vues par l'OCR
+        "exclude_list":      [],   # noms d'améliorations à NE JAMAIS lancer
     },
 }
 
@@ -139,6 +150,11 @@ class UpgradesRunner(WallsUpgrader):
         # Debug OCR : enregistre les captures filtrées vues par l'OCR à chaque
         # lecture (case à cocher de l'onglet Améliorations).
         self.debug_ocr = bool(self.ucfg["params"].get("debug_ocr", False))
+        # Liste d'exclusion : noms d'améliorations à ne jamais lancer, normalisés
+        # (minuscule, sans accents ni espaces) pour une comparaison robuste.
+        self._excludes = [normalize_upgrade_name(e)
+                          for e in self.ucfg["params"].get("exclude_list", [])
+                          if normalize_upgrade_name(e)]
 
     # ---------- lectures ----------
 
@@ -187,6 +203,11 @@ class UpgradesRunner(WallsUpgrader):
             return "amélioration déjà en cours (barre de progression / temps)"
         if "disponible" in row["name"].lower():
             return "ligne « Disponible » (ouvrier libre, pas une amélioration)"
+        if self._excludes:
+            name_norm = normalize_upgrade_name(row["name"])
+            for excl in self._excludes:
+                if excl in name_norm:
+                    return f"exclu par la liste d'exclusion (« {excl} »)"
         if row.get("is_new"):
             return "nouveau bâtiment ('Nouv.'), pas une amélioration"
         if row["price"] <= 0:
