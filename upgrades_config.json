@@ -23,7 +23,7 @@
         "use_elexir_noir": true,
         "include_remparts": false,
         "keep_workers_free": 0,
-        "max_upgrades": 10,
+        "max_upgrades": 1,
         "max_scrolls": 8,
         "scroll_amount": -210,
         "debug_ocr": false

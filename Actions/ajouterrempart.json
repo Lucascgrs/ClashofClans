@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "date_enregistrement": "2025-08-28 05:07:25",
+    "nombre_actions": 4,
+    "duree_totale": 2.4190568923950195
+  },
+  "actions": [
+    {
+      "type": "position_initiale",
+      "x": 628,
+      "y": 553,
+      "temps": 0.0
+    },
+    {
+      "type": "clic_souris",
+      "x": 942,
+      "y": 830,
+      "bouton": "Button.left",
+      "presse": true,
+      "temps": 1.2773091793060303
+    },
+    {
+      "type": "clic_souris",
+      "x": 942,
+      "y": 830,
+      "bouton": "Button.left",
+      "presse": false,
+      "temps": 1.3654379844665527
+    }
+  ]
+}
