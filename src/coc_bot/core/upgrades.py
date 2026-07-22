@@ -209,7 +209,11 @@ class UpgradesRunner(WallsUpgrader):
 
         Le bouton se trouve à une position DIFFÉRENTE selon le bâtiment : on lit
         donc le mot « Améliorer » dans la zone `zones.ameliorer` et on renvoie
-        les coordonnées ABSOLUES (x, y) de son centre, ou None si non trouvé."""
+        les coordonnées ABSOLUES (x, y) de son centre, ou None si non trouvé.
+
+        On vise la bbox du MOT « Améliorer » lui-même (détection OCR unitaire),
+        et non le centre de toute la ligne : la ligne inclut souvent le COÛT
+        affiché à côté, ce qui décalait le clic à côté du bouton."""
         zone = self.ucfg["zones"].get("ameliorer")
         if not zone or zone.get("x2", 0) <= zone.get("x1", 0):
             raise KeyError("Zone 'ameliorer' non configurée "
@@ -218,15 +222,27 @@ class UpgradesRunner(WallsUpgrader):
         if img is None:
             self.log("  ⚠ Capture de la zone 'Améliorer' impossible.")
             return None
-        lines = self._group_lines(self._readtext(img, "ameliorer"), ox, oy)
-        for line in lines:
+        results = self._readtext(img, "ameliorer")
+        # 1) Détection UNITAIRE contenant « amélior » → bbox serrée = clic précis
+        #    au centre du mot (et non de la ligne « Améliorer + coût »).
+        for bbox, text, _conf in results:
+            if "amelior" in normalize_upgrade_name(text):
+                xs = [p[0] for p in bbox]
+                ys = [p[1] for p in bbox]
+                cx = int((min(xs) + max(xs)) / 2) + ox
+                cy = int((min(ys) + max(ys)) / 2) + oy
+                self.log(f"  → « Améliorer » localisé à ({cx}, {cy}) : '{text}'")
+                return cx, cy
+        # 2) Repli : le mot a pu être coupé par l'OCR → on retombe sur la ligne
+        #    regroupée qui contient « amélior ».
+        for line in self._group_lines(results, ox, oy):
             if "amelior" in normalize_upgrade_name(line["text"]):
                 cx = int((line["left"] + line["right"]) / 2)
                 cy = int((line["top"] + line["bot"]) / 2)
-                self.log(f"  → « Améliorer » localisé à ({cx}, {cy}) "
+                self.log(f"  → « Améliorer » (ligne entière) à ({cx}, {cy}) "
                          f": '{line['text']}'")
                 return cx, cy
-        lus = " | ".join(l["text"] for l in lines) or "(rien)"
+        lus = " | ".join(t for _b, t, _c in results) or "(rien)"
         self.log(f"  ⚠ « Améliorer » non lu dans la zone. Texte OCR : {lus}")
         return None
 
