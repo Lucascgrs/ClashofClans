@@ -1,54 +1,54 @@
 {
     "zones": {
         "ouvriers": {
-            "x1": 943,
-            "y1": 39,
-            "x2": 1030,
-            "y2": 79
-        },
-        "or": {
-            "x1": 1582,
-            "y1": 43,
-            "x2": 1804,
+            "x1": 929,
+            "y1": 38,
+            "x2": 1040,
             "y2": 82
         },
+        "or": {
+            "x1": 1541,
+            "y1": 43,
+            "x2": 1806,
+            "y2": 83
+        },
         "elexir": {
-            "x1": 1594,
-            "y1": 144,
-            "x2": 1807,
-            "y2": 181
+            "x1": 1539,
+            "y1": 142,
+            "x2": 1809,
+            "y2": 183
         },
         "liste_ameliorations": {
-            "x1": 634,
-            "y1": 149,
-            "x2": 1330,
-            "y2": 823
+            "x1": 681,
+            "y1": 151,
+            "x2": 1282,
+            "y2": 822
         }
     },
     "buttons": {
         "info_ouvriers": {
             "x": 859,
-            "y": 22
+            "y": 24
         },
         "ameliorer_plus": {
-            "x": 962,
-            "y": 832
+            "x": 960,
+            "y": 911
         },
         "ameliorer_or": {
-            "x": 1166,
-            "y": 836
+            "x": 1173,
+            "y": 909
         },
         "valider_or": {
-            "x": 1164,
-            "y": 690
+            "x": 1158,
+            "y": 676
         },
         "ameliorer_elexir": {
             "x": 1385,
-            "y": 852
+            "y": 882
         },
         "valider_elexir": {
-            "x": 1168,
-            "y": 691
+            "x": 1170,
+            "y": 698
         },
         "clic_neutre": {
             "x": 0,
@@ -71,7 +71,7 @@
         "click_y_offset": 0,
         "manual_price_or": 0,
         "manual_price_elexir": 0,
-        "price_split_x": 0,
+        "price_split_x": 1043,
         "symbol_min_pixels": 80,
         "symbol_min_pixels_dark": 250,
         "new_min_pixels": 60,

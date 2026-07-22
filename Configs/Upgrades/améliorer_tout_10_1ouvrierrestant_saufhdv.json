@@ -29,7 +29,6 @@
         "debug_ocr": false,
         "exclude_list": [
             "Hôtel de ville"
-        ],
-        "place_new_building": false
+        ]
     }
 }
