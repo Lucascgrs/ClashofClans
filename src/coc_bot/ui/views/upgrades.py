@@ -245,14 +245,16 @@ class UpgradesView(BaseView):
                     c = row["counts"]
                     flag = ""
                     if row.get("in_progress"):
-                        flag += "  ⏳ EN COURS (ignoré)"
+                        flag += "  ⏳ EN COURS"
                     if row.get("is_new"):
-                        flag += "  ⚠ NOUV. (ignoré)"
+                        flag += "  ⚠ NOUV."
+                    flag += "  ✅ payable" if row.get("affordable") else "  ❌ trop cher"
                     self._log(
                         f"  '{row['name']}' | {row['symbol'] or '?'} | {row['price']}{flag}"
-                        f"   (px or={c['or']} elexir={c['elexir']} "
+                        f"   (or={c['or']} elexir={c['elexir']} elexir_V={c.get('elexir_v', 0)} "
                         f"noir={c['elexir_noir']} vert_nom={c.get('nouv', 0)} "
-                        f"vert_prix={c.get('progress', 0)})")
+                        f"vert_prix={c.get('progress', 0)} "
+                        f"blanc={c.get('price_white', 0)} rouge={c.get('price_red', 0)})")
                 runner._save_rows_debug(rows, img, offset)
                 self._log("--- Fin lecture ---")
             except Exception as e:

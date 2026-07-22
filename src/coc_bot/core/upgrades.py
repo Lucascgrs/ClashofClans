@@ -200,9 +200,11 @@ class UpgradesRunner(WallsUpgrader):
                 return "rempart avec symbole noir (incohérent)"
         if not p.get(f"use_{symbol}", True):
             return f"type {symbol} décoché"
-        have = resources.get(symbol, 0)
-        if have < row["price"]:
-            return f"pas assez de {symbol} ({have} < {row['price']})"
+        # Payable ? On se fie à la COULEUR du prix (blanc = oui, rouge = non),
+        # bien plus fiable que comparer deux montants OCR (le prix rouge, souvent
+        # un grand nombre, est régulièrement mal lu sur son 1er chiffre).
+        if not row.get("affordable", True):
+            return f"trop cher (prix rouge → {symbol} insuffisant)"
         return ""
 
     def _upgrade_first_possible(self, resources: dict) -> bool:

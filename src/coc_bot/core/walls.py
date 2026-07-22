@@ -68,6 +68,10 @@ WALLS_DEFAULT_CONFIG = {
         # pour l'élixir noir (les contours sombres des icônes créent du bruit).
         "symbol_min_pixels":      80,
         "symbol_min_pixels_dark": 250,
+        # Séparation élixir CLAIR / élixir NOIR : si la luminosité moyenne (V,
+        # 0-255) des pixels teinte-élixir est ≤ ce seuil, la ressource est de
+        # l'élixir NOIR (icône sombre). Au-dessus : élixir clair.
+        "elexir_dark_v_max":      150,
         # Étiquette verte 'Nouv.' (nouveau bâtiment, pas une amélioration) :
         # nb de pixels verts minimum dans la partie nom pour marquer la ligne.
         "new_min_pixels":         60,
@@ -343,19 +347,37 @@ class WallsUpgrader:
         haut pour ignorer les contours sombres des icônes."""
         hsv = cv2.cvtColor(band_rgb, cv2.COLOR_RGB2HSV)
         counts = {}
+        masks = {}
         for name, (lo, hi) in self._SYMBOL_HSV_RANGES.items():
-            counts[name] = int(cv2.countNonZero(cv2.inRange(hsv, lo, hi)))
+            m = cv2.inRange(hsv, lo, hi)
+            masks[name] = m
+            counts[name] = int(cv2.countNonZero(m))
         counts["elexir_noir"] = int(cv2.countNonZero(
             cv2.inRange(hsv, (0, 0, 0), (179, 255, 70))))
         # Vert vif = barre de progression d'une amélioration EN COURS (ou icône
         # « disponible »). Sert à écarter les lignes déjà en cours d'amélioration.
         counts["progress"] = int(cv2.countNonZero(
             cv2.inRange(hsv, *self._NEW_HSV_RANGE)))
+        # Luminosité moyenne des pixels de teinte « élixir » : l'icône d'élixir
+        # CLAIR (rose vif, héros/bâtiments élixir) est LUMINEUSE, celle d'élixir
+        # NOIR (goutte violet sombre, ex. Roi/Reine/héros élixir noir) est SOMBRE.
+        # → un même intervalle de teinte, mais séparable par la valeur (V).
+        if counts["elexir"] > 0:
+            counts["elexir_v"] = int(cv2.mean(hsv[:, :, 2], mask=masks["elexir"])[0])
+        else:
+            counts["elexir_v"] = 0
 
-        min_px   = int(self.cfg["params"].get("symbol_min_pixels", 80))
-        min_dark = int(self.cfg["params"].get("symbol_min_pixels_dark", 250))
+        min_px     = int(self.cfg["params"].get("symbol_min_pixels", 80))
+        min_dark   = int(self.cfg["params"].get("symbol_min_pixels_dark", 250))
+        dark_v_max = int(self.cfg["params"].get("elexir_dark_v_max", 150))
+
         if counts["or"] >= min_px or counts["elexir"] >= min_px:
-            return ("or" if counts["or"] >= counts["elexir"] else "elexir"), counts
+            if counts["or"] >= counts["elexir"]:
+                return "or", counts
+            # Teinte élixir : élixir CLAIR ou élixir NOIR selon la luminosité.
+            if counts["elexir_v"] and counts["elexir_v"] <= dark_v_max:
+                return "elexir_noir", counts
+            return "elexir", counts
         if counts["elexir_noir"] >= min_dark:
             return "elexir_noir", counts
         return None, counts
@@ -411,11 +433,21 @@ class WallsUpgrader:
             price_txt = " ".join(r[1] for r in self._readtext(price_mask, "price"))
             price, _ = _extract_price(price_txt)
 
+            # Payable ? Signal COULEUR : le jeu affiche le prix en BLANC quand la
+            # ressource suffit, en ROUGE sinon. C'est bien plus fiable que d'OCR
+            # le montant (surtout en rouge) puis de le comparer à une ressource
+            # elle aussi lue par OCR. On mesure donc quelle couleur domine.
+            price_white = int(cv2.countNonZero(white))
+            price_red   = int(cv2.countNonZero(red))
+            affordable  = (price_white + price_red) > 0 and price_white >= price_red
+
             # Symbole : on EFFACE d'abord le texte du prix (blanc + rouge) pour ne
             # pas qu'un prix rouge (≈ magenta en HSV) soit compté comme élixir.
             symbol_band = band.copy()
             symbol_band[price_mask > 0] = 0
             symbol, counts = self._detect_symbol(symbol_band)
+            counts["price_white"] = price_white
+            counts["price_red"] = price_red
 
             # Amélioration EN COURS : barre de progression verte dans la bande
             # droite (prix). À écarter : la ligne n'est pas cliquable ici.
@@ -439,6 +471,7 @@ class WallsUpgrader:
                 "symbol":      symbol,
                 "is_new":      is_new,
                 "in_progress": in_progress,
+                "affordable":  affordable,
                 "counts":      counts,
                 "click_x": int(line["left"] + click_dx),
                 "click_y": int((line["top"] + line["bot"]) / 2 + click_dy),
