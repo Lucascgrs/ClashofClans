@@ -71,6 +71,9 @@ WALLS_DEFAULT_CONFIG = {
         # Étiquette verte 'Nouv.' (nouveau bâtiment, pas une amélioration) :
         # nb de pixels verts minimum dans la partie nom pour marquer la ligne.
         "new_min_pixels":         60,
+        # Barre de progression verte (amélioration EN COURS) dans la bande prix :
+        # au-delà de ce nb de pixels verts, la ligne est ignorée (déjà en cours).
+        "progress_min_pixels":    200,
     },
 }
 
@@ -344,6 +347,10 @@ class WallsUpgrader:
             counts[name] = int(cv2.countNonZero(cv2.inRange(hsv, lo, hi)))
         counts["elexir_noir"] = int(cv2.countNonZero(
             cv2.inRange(hsv, (0, 0, 0), (179, 255, 70))))
+        # Vert vif = barre de progression d'une amélioration EN COURS (ou icône
+        # « disponible »). Sert à écarter les lignes déjà en cours d'amélioration.
+        counts["progress"] = int(cv2.countNonZero(
+            cv2.inRange(hsv, *self._NEW_HSV_RANGE)))
 
         min_px   = int(self.cfg["params"].get("symbol_min_pixels", 80))
         min_dark = int(self.cfg["params"].get("symbol_min_pixels_dark", 250))
@@ -383,6 +390,8 @@ class WallsUpgrader:
 
         click_dx = int(self.cfg["params"].get("click_x_offset", 30))
         click_dy = int(self.cfg["params"].get("click_y_offset", 0))
+        new_min = int(self.cfg["params"].get("new_min_pixels", 60))
+        progress_min = int(self.cfg["params"].get("progress_min_pixels", 200))
         pad = 6
 
         rows = []
@@ -393,31 +402,44 @@ class WallsUpgrader:
                 continue
             band = raw[y1b:y2b, split:]
 
-            # Prix : ne garder que les pixels quasi blancs (texte du prix),
-            # ce qui efface le symbole coloré et le fond.
+            # Prix : garder les pixels du TEXTE du prix, qu'il soit BLANC (amélio
+            # payable) ou ROUGE/orangé (amélio trop chère). Le masque « blanc
+            # seul » rendait les prix rouges invisibles pour l'OCR → lus comme 0.
             white = cv2.inRange(band, (200, 200, 200), (255, 255, 255))
-            price_txt = " ".join(r[1] for r in self._readtext(white, "price"))
+            red   = cv2.inRange(band, (150, 0, 0), (255, 150, 150))
+            price_mask = cv2.bitwise_or(white, red)
+            price_txt = " ".join(r[1] for r in self._readtext(price_mask, "price"))
             price, _ = _extract_price(price_txt)
 
-            symbol, counts = self._detect_symbol(band)
+            # Symbole : on EFFACE d'abord le texte du prix (blanc + rouge) pour ne
+            # pas qu'un prix rouge (≈ magenta en HSV) soit compté comme élixir.
+            symbol_band = band.copy()
+            symbol_band[price_mask > 0] = 0
+            symbol, counts = self._detect_symbol(symbol_band)
 
-            # 'Nouv.' : pixels verts dans la partie NOM (du début du texte à
-            # la barre), à l'écart de l'icône du bâtiment (plus à gauche).
+            # Amélioration EN COURS : barre de progression verte dans la bande
+            # droite (prix). À écarter : la ligne n'est pas cliquable ici.
+            in_progress = counts.get("progress", 0) >= progress_min
+
+            # 'Nouv.' (nouveau bâtiment) : vert dans la partie NOM. Le petit
+            # pictogramme « étiquette » vert présent sur CHAQUE ligne pollue ce
+            # comptage → un bâtiment RÉELLEMENT nouveau n'ayant jamais de prix, on
+            # n'accepte 'nouv' que si aucun prix n'a été lu (ou texte 'nouv').
             name_x1 = max(0, int(line["left"] - ox) - 10)
             name_band = raw[y1b:y2b, name_x1:split]
             hsv_name = cv2.cvtColor(name_band, cv2.COLOR_RGB2HSV)
             counts["nouv"] = int(cv2.countNonZero(
                 cv2.inRange(hsv_name, *self._NEW_HSV_RANGE)))
-            is_new = (counts["nouv"] >=
-                      int(self.cfg["params"].get("new_min_pixels", 60))
-                      or "nouv" in line["text"].lower())
+            is_new = ("nouv" in line["text"].lower()
+                      or (counts["nouv"] >= new_min and price <= 0))
 
             rows.append({
-                "name":    line["text"],
-                "price":   price,
-                "symbol":  symbol,
-                "is_new":  is_new,
-                "counts":  counts,
+                "name":        line["text"],
+                "price":       price,
+                "symbol":      symbol,
+                "is_new":      is_new,
+                "in_progress": in_progress,
+                "counts":      counts,
                 "click_x": int(line["left"] + click_dx),
                 "click_y": int((line["top"] + line["bot"]) / 2 + click_dy),
                 "top":     line["top"],
@@ -448,6 +470,8 @@ class WallsUpgrader:
                 label = f"{row['symbol'] or '?'}:{row['price']}"
                 if row.get("is_new"):
                     label += " NOUV"
+                if row.get("in_progress"):
+                    label += " ENC"
                 cv2.putText(annotated, label,
                             (split + 4, max(12, y1 + 14)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)

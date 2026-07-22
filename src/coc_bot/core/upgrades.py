@@ -183,6 +183,8 @@ class UpgradesRunner(WallsUpgrader):
     def _row_status(self, row, resources: dict) -> str:
         """Retourne '' si la ligne est réalisable, sinon la raison du refus."""
         p = self.ucfg["params"]
+        if row.get("in_progress"):
+            return "amélioration déjà en cours (barre de progression verte)"
         if row.get("is_new"):
             return "nouveau bâtiment ('Nouv.'), pas une amélioration"
         if row["price"] <= 0:

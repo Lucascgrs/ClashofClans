@@ -243,11 +243,16 @@ class UpgradesView(BaseView):
                     return
                 for row in rows:
                     c = row["counts"]
-                    flag = "  ⚠ NOUV. (ignoré)" if row.get("is_new") else ""
+                    flag = ""
+                    if row.get("in_progress"):
+                        flag += "  ⏳ EN COURS (ignoré)"
+                    if row.get("is_new"):
+                        flag += "  ⚠ NOUV. (ignoré)"
                     self._log(
                         f"  '{row['name']}' | {row['symbol'] or '?'} | {row['price']}{flag}"
                         f"   (px or={c['or']} elexir={c['elexir']} "
-                        f"noir={c['elexir_noir']} vert={c.get('nouv', 0)})")
+                        f"noir={c['elexir_noir']} vert_nom={c.get('nouv', 0)} "
+                        f"vert_prix={c.get('progress', 0)})")
                 runner._save_rows_debug(rows, img, offset)
                 self._log("--- Fin lecture ---")
             except Exception as e:
