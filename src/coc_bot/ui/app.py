@@ -13,6 +13,7 @@ un écran à la fois. Fournit aussi les services partagés par tous les écrans 
 from __future__ import annotations
 
 import importlib
+import sys
 import threading
 from typing import Callable, Optional
 
@@ -21,6 +22,24 @@ import customtkinter as ctk
 from .. import paths
 from ..core import orchestration
 from . import theme
+
+
+def _force_utf8_io() -> None:
+    """Force stdout/stderr en UTF-8 (errors='replace').
+
+    Sur certaines consoles Windows (code page héritée cp1252), ``print`` d'un
+    caractère non encodable — « ⚠ », « → », emojis… — lève ``UnicodeEncodeError``
+    (« 'charmap' codec can't encode character »). On reconfigure donc les flux en
+    UTF-8 tolérant dès le démarrage : les messages s'affichent partout, quel que
+    soit l'ordinateur, sans jamais faire planter l'application."""
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 
 # (clé, icône, libellé, module, classe)
@@ -40,6 +59,7 @@ NAV_ITEMS = [
 
 class CocBotApp(ctk.CTk):
     def __init__(self):
+        _force_utf8_io()
         super().__init__()
         theme.setup_appearance("dark")
 
@@ -175,7 +195,15 @@ class CocBotApp(ctk.CTk):
             del self._log_buffer[:1000]
         if self._log_panel is not None:
             self._log_panel.log(text)
-        print(text)
+        # Filet de sécurité : même si les flux n'ont pas pu être reconfigurés,
+        # on n'échoue jamais à cause d'un caractère non encodable par la console.
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            try:
+                print(text.encode("ascii", "replace").decode("ascii"))
+            except Exception:
+                pass
 
     # =====================================================================
     # Macros Actions/
@@ -324,6 +352,7 @@ class CocBotApp(ctk.CTk):
 
 def main():
     """Point d'entrée de l'interface graphique."""
+    _force_utf8_io()
     app = CocBotApp()
     app.mainloop()
 
