@@ -77,7 +77,9 @@ WALLS_DEFAULT_CONFIG = {
         "new_min_pixels":         60,
         # Barre de progression verte (amélioration EN COURS) dans la bande prix :
         # au-delà de ce nb de pixels verts, la ligne est ignorée (déjà en cours).
-        "progress_min_pixels":    200,
+        # Réglé bas pour attraper les barres encore courtes ; complété par la
+        # détection d'un temps (H/J/MIN) dans le prix pour les cas limites.
+        "progress_min_pixels":    155,
     },
 }
 
@@ -432,6 +434,12 @@ class WallsUpgrader:
             price_mask = cv2.bitwise_or(white, red)
             price_txt = " ".join(r[1] for r in self._readtext(price_mask, "price"))
             price, _ = _extract_price(price_txt)
+            # Une amélioration EN COURS affiche un TEMPS (« 12H 59MIN », « 2j »,
+            # « 1J 12H ») au lieu d'un prix : la présence de H / J / MIN dans le
+            # texte de droite trahit une ligne en cours, même quand sa barre de
+            # progression est encore courte (peu de pixels verts).
+            time_like = (bool(re.search(r"[HhJj]", price_txt))
+                         or "MIN" in price_txt.upper())
 
             # Payable ? Signal COULEUR : le jeu affiche le prix en BLANC quand la
             # ressource suffit, en ROUGE sinon. C'est bien plus fiable que d'OCR
@@ -450,20 +458,28 @@ class WallsUpgrader:
             counts["price_red"] = price_red
 
             # Amélioration EN COURS : barre de progression verte dans la bande
-            # droite (prix). À écarter : la ligne n'est pas cliquable ici.
-            in_progress = counts.get("progress", 0) >= progress_min
+            # droite (prix) OU un temps affiché à la place du prix. À écarter :
+            # la ligne n'est pas une amélioration lançable.
+            in_progress = (counts.get("progress", 0) >= progress_min) or time_like
 
-            # 'Nouv.' (nouveau bâtiment) : vert dans la partie NOM. Le petit
-            # pictogramme « étiquette » vert présent sur CHAQUE ligne pollue ce
-            # comptage → un bâtiment RÉELLEMENT nouveau n'ayant jamais de prix, on
-            # n'accepte 'nouv' que si aucun prix n'a été lu (ou texte 'nouv').
-            name_x1 = max(0, int(line["left"] - ox) - 10)
-            name_band = raw[y1b:y2b, name_x1:split]
-            hsv_name = cv2.cvtColor(name_band, cv2.COLOR_RGB2HSV)
-            counts["nouv"] = int(cv2.countNonZero(
-                cv2.inRange(hsv_name, *self._NEW_HSV_RANGE)))
-            is_new = ("nouv" in line["text"].lower()
-                      or (counts["nouv"] >= new_min and price <= 0))
+            # 'Nouv.' (nouveau bâtiment) : un libellé VERT « Nouv. » précède le
+            # nom. On OCR les pixels verts À GAUCHE du nom et on cherche « nouv ».
+            # Le pictogramme « étiquette » vert présent sur chaque ligne ne
+            # contient pas de texte → aucun faux positif ; et un vrai « Nouv. »
+            # est reconnu même s'il porte un prix (bâtiment neuf payant).
+            name_left = max(0, int(line["left"] - ox))
+            nouv_txt = ""
+            if name_left > 4:
+                green_lbl = cv2.inRange(
+                    cv2.cvtColor(raw[y1b:y2b, 0:name_left], cv2.COLOR_RGB2HSV),
+                    *self._NEW_HSV_RANGE)
+                counts["nouv"] = int(cv2.countNonZero(green_lbl))
+                if counts["nouv"] >= new_min:
+                    nouv_txt = " ".join(
+                        r[1] for r in self._readtext(green_lbl, "nouv")).lower()
+            else:
+                counts["nouv"] = 0
+            is_new = "nouv" in line["text"].lower() or "nouv" in nouv_txt
 
             rows.append({
                 "name":        line["text"],

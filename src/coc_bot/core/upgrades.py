@@ -184,7 +184,9 @@ class UpgradesRunner(WallsUpgrader):
         """Retourne '' si la ligne est réalisable, sinon la raison du refus."""
         p = self.ucfg["params"]
         if row.get("in_progress"):
-            return "amélioration déjà en cours (barre de progression verte)"
+            return "amélioration déjà en cours (barre de progression / temps)"
+        if "disponible" in row["name"].lower():
+            return "ligne « Disponible » (ouvrier libre, pas une amélioration)"
         if row.get("is_new"):
             return "nouveau bâtiment ('Nouv.'), pas une amélioration"
         if row["price"] <= 0:
@@ -224,7 +226,10 @@ class UpgradesRunner(WallsUpgrader):
             rows, img, offset = self.read_upgrade_rows()
             if not rows:
                 continue
-            for row in rows:
+            # La dernière ligne est souvent COUPÉE en bas de la zone visible →
+            # OCR peu fiable. On l'ignore quand la liste dépasse 5 lignes.
+            usable = rows[:-1] if len(rows) > 5 else rows
+            for row in usable:
                 label = f"'{row['name']}' [{row['symbol'] or '?'}] prix={row['price']}"
                 reason = self._row_status(row, resources)
                 if reason:
