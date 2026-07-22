@@ -67,6 +67,7 @@ def ensure_dirs() -> None:
 ENV_FILE: str = data_path(".env")
 COORDS_CONFIG_FILE: str = data_path("coords_config.json")
 LOCATIONS_FILE: str = data_path("locations.json")
+LEAGUES_FILE: str = data_path("leagues.json")
 WALLS_CONFIG_FILE: str = data_path("walls_config.json")
 UPGRADES_CONFIG_FILE: str = data_path("upgrades_config.json")
 ATTACK_CONFIG_FILE: str = data_path("attack_config.json")

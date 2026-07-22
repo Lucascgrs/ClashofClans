@@ -50,7 +50,8 @@ UPGRADES_DEFAULT_CONFIG = {
         "keep_workers_free": 0,    # ouvriers à ne PAS faire travailler
         "max_upgrades":      10,   # garde-fou : améliorations max par session
         "max_scrolls":       8,    # scrolls max pour cette automatisation
-        "scroll_amount":     -3,   # intensité du scroll (négatif = vers le bas)
+        "scroll_amount":     -210, # intensité du scroll (négatif = vers le bas)
+        "debug_ocr":         False,# enregistre les captures filtrées vues par l'OCR
     },
 }
 
@@ -134,7 +135,10 @@ class UpgradesRunner(WallsUpgrader):
         # Scroll propre à cette automatisation : surcharge les valeurs
         # héritées de walls_config pour _scroll_list / max_scrolls.
         self.cfg["params"]["max_scrolls"]   = int(self.ucfg["params"].get("max_scrolls", 8))
-        self.cfg["params"]["scroll_amount"] = int(self.ucfg["params"].get("scroll_amount", -3))
+        self.cfg["params"]["scroll_amount"] = int(self.ucfg["params"].get("scroll_amount", -210))
+        # Debug OCR : enregistre les captures filtrées vues par l'OCR à chaque
+        # lecture (case à cocher de l'onglet Améliorations).
+        self.debug_ocr = bool(self.ucfg["params"].get("debug_ocr", False))
 
     # ---------- lectures ----------
 

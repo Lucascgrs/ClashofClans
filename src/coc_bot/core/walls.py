@@ -50,7 +50,7 @@ WALLS_DEFAULT_CONFIG = {
     "params": {
         "keyword":            "rempart",
         "max_scrolls":        8,
-        "scroll_amount":      -3,
+        "scroll_amount":      -210,
         "delay_click":        0.6,
         "delay_open_menu":    1.5,
         "delay_validate":     1.2,
@@ -186,6 +186,10 @@ class WallsUpgrader:
         self.stop_event = stop_event
         self._reader = None
         self._cam = None
+        # Debug OCR : si True, chaque image FILTRÉE envoyée à l'OCR est
+        # enregistrée (pour voir exactement ce que « voit » l'OCR). Activé via
+        # la case à cocher de l'onglet Améliorations (UpgradesRunner).
+        self.debug_ocr = False
 
     # ---------- helpers ----------
 
@@ -228,12 +232,31 @@ class WallsUpgrader:
         _, thresh = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY)
         return thresh, (x1, y1)
 
+    def _dump_ocr_filter(self, img, tag: str) -> None:
+        """Enregistre l'image FILTRÉE telle que la voit l'OCR (mode debug)."""
+        if img is None:
+            return
+        try:
+            os.makedirs(DEBUG_OCR_DIR, exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
+            path = os.path.join(DEBUG_OCR_DIR, f"ocrfilter_{tag}_{ts}.png")
+            cv2.imwrite(path, img)
+            self.log(f"  → [debug] capture OCR filtrée : {path}")
+        except Exception as e:
+            self.log(f"  → erreur debug OCR : {e}")
+
+    def _readtext(self, img, tag: str = "ocr"):
+        """OCR d'une image DÉJÀ filtrée ; enregistre la vue OCR si debug actif."""
+        if self.debug_ocr:
+            self._dump_ocr_filter(img, tag)
+        return self._reader.readtext(img)
+
     def _ocr_text(self, zone: dict) -> str:
         self._init_capture()
         img, _ = self._grab(zone)
         if img is None:
             return ""
-        results = self._reader.readtext(img)
+        results = self._readtext(img, "res")
         return " ".join(r[1] for r in results)
 
     @staticmethod
@@ -283,7 +306,7 @@ class WallsUpgrader:
         img, (ox, oy) = self._grab(zone)
         if img is None:
             return [], None, (0, 0)
-        results = self._reader.readtext(img)
+        results = self._readtext(img, "lines")
         return self._group_lines(results, ox, oy, line_threshold), img, (ox, oy)
 
     # ---------- séparation NOM / (SYMBOLE + PRIX) ----------
@@ -356,7 +379,7 @@ class WallsUpgrader:
         # Noms : partie gauche binarisée (texte blanc)
         left_gray = cv2.cvtColor(raw[:, :split], cv2.COLOR_BGR2GRAY)
         _, left_bin = cv2.threshold(left_gray, 230, 255, cv2.THRESH_BINARY)
-        names = self._group_lines(self._reader.readtext(left_bin), ox, oy)
+        names = self._group_lines(self._readtext(left_bin, "names"), ox, oy)
 
         click_dx = int(self.cfg["params"].get("click_x_offset", 30))
         click_dy = int(self.cfg["params"].get("click_y_offset", 0))
@@ -373,7 +396,7 @@ class WallsUpgrader:
             # Prix : ne garder que les pixels quasi blancs (texte du prix),
             # ce qui efface le symbole coloré et le fond.
             white = cv2.inRange(band, (200, 200, 200), (255, 255, 255))
-            price_txt = " ".join(r[1] for r in self._reader.readtext(white))
+            price_txt = " ".join(r[1] for r in self._readtext(white, "price"))
             price, _ = _extract_price(price_txt)
 
             symbol, counts = self._detect_symbol(band)
@@ -569,7 +592,7 @@ class WallsUpgrader:
         z = self.cfg["zones"]["liste_ameliorations"]
         cx = (z["x1"] + z["x2"]) // 2
         cy = (z["y1"] + z["y2"]) // 2
-        amount = int(self.cfg["params"].get("scroll_amount", -3))
+        amount = int(self.cfg["params"].get("scroll_amount", -210))
         self.log(f"  scroll: moveTo({cx}, {cy}) puis pyautogui.scroll({amount})")
         pyautogui.moveTo(cx, cy)
         pyautogui.scroll(amount)

@@ -41,6 +41,7 @@ from .token_manager import get_or_create_token
 from ..paths import (
     COORDS_CONFIG_FILE as COORDS_FILE,
     LOCATIONS_FILE,
+    LEAGUES_FILE,
     FILE_ALL_CLANS,
     FILE_ALL_PLAYERS,
     FILE_EPF_PLAYERS,
@@ -60,10 +61,12 @@ logging.basicConfig(
 API_TOKEN = get_or_create_token()
 
 # --- CONFIGURATION FILTRES (Modifiée par le GUI) ---
+# min_league_id : identifiant de la ligue MINIMALE exigée (grade). 0 = pas de
+# filtre de ligue. Remplace l'ancien filtre "min_trophies" (retiré).
 FILTER_CONFIG = {
     "min_townhall": 13,
     "min_xp": 0,
-    "min_trophies": 0,
+    "min_league_id": 0,
     "min_donations": 0,
     "exclude_unranked": True,
     "require_activity": True,  # dons > 0 ou reçus > 0
@@ -130,6 +133,121 @@ def load_locations():
 
 # Dictionnaire de mapping pour l'interface
 LOCATIONS_DICT = load_locations()
+
+
+# =============================================================================
+# LIGUES (grade) — remplace le filtre "trophées"
+# =============================================================================
+# Liste ORDONNÉE des ligues, de la plus basse à la plus haute. Le « grade » d'un
+# joueur = le rang (position) de sa ligue dans cette liste. Le filtre "grade
+# minimum" ne garde que les joueurs dont le rang de ligue ≥ celui choisi.
+#
+# La liste par défaut ci-dessous contient les ligues « classiques » (Unranked →
+# Legend). Le bouton « MAJ Ligues (API) » de l'interface appelle
+# fetch_all_leagues() pour récupérer la liste RÉELLE et à jour depuis l'API
+# (y compris le nouveau système de ligues classées numérotées), triée par id.
+DEFAULT_LEAGUES = [
+    {"id": 29000000, "name": "Unranked"},
+    {"id": 29000001, "name": "Bronze League III"},
+    {"id": 29000002, "name": "Bronze League II"},
+    {"id": 29000003, "name": "Bronze League I"},
+    {"id": 29000004, "name": "Silver League III"},
+    {"id": 29000005, "name": "Silver League II"},
+    {"id": 29000006, "name": "Silver League I"},
+    {"id": 29000007, "name": "Gold League III"},
+    {"id": 29000008, "name": "Gold League II"},
+    {"id": 29000009, "name": "Gold League I"},
+    {"id": 29000010, "name": "Crystal League III"},
+    {"id": 29000011, "name": "Crystal League II"},
+    {"id": 29000012, "name": "Crystal League I"},
+    {"id": 29000013, "name": "Master League III"},
+    {"id": 29000014, "name": "Master League II"},
+    {"id": 29000015, "name": "Master League I"},
+    {"id": 29000016, "name": "Champion League III"},
+    {"id": 29000017, "name": "Champion League II"},
+    {"id": 29000018, "name": "Champion League I"},
+    {"id": 29000019, "name": "Titan League III"},
+    {"id": 29000020, "name": "Titan League II"},
+    {"id": 29000021, "name": "Titan League I"},
+    {"id": 29000022, "name": "Legend League"},
+]
+
+
+def load_leagues() -> list:
+    """Charge la liste ordonnée des ligues depuis leagues.json (ou la liste par
+    défaut). L'ordre du fichier fait foi (trié par id croissant à l'écriture)."""
+    if os.path.exists(LEAGUES_FILE):
+        try:
+            with open(LEAGUES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data:
+                return [{"id": it.get("id"), "name": it.get("name")} for it in data]
+        except Exception as e:
+            logging.error(f"Erreur chargement leagues.json : {e}")
+    return [dict(lg) for lg in DEFAULT_LEAGUES]
+
+
+def _league_rank_maps(leagues: list):
+    """Construit {id: rang} et {nom: rang} à partir d'une liste ordonnée."""
+    id_to_rank, name_to_rank = {}, {}
+    for rank, lg in enumerate(leagues):
+        if lg.get("id") is not None:
+            id_to_rank[lg["id"]] = rank
+        if lg.get("name"):
+            name_to_rank[lg["name"]] = rank
+    return id_to_rank, name_to_rank
+
+
+LEAGUES_LIST = load_leagues()
+LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK = _league_rank_maps(LEAGUES_LIST)
+
+
+def fetch_all_leagues(limit: int = 100) -> list:
+    """Récupère TOUTES les ligues via l'API (GET /leagues, paginé), les trie par
+    id croissant (= ordre de progression) et sauvegarde dans leagues.json.
+    Met aussi à jour les tables globales de rangs pour un usage immédiat."""
+    all_items = []
+    params = {"limit": limit}
+    url = f"{API_URL}/leagues"
+    while True:
+        resp = safe_get(url, HEADERS, params=params)
+        if not resp:
+            break
+        data = resp.json()
+        items = data.get("items", [])
+        if not items:
+            break
+        all_items.extend(items)
+        logging.info(f"Récupéré {len(items)} ligues...")
+        after = data.get("paging", {}).get("cursors", {}).get("after")
+        if not after:
+            break
+        params["after"] = after
+        time.sleep(0.3)
+
+    all_items.sort(key=lambda it: it.get("id", 0))
+    slim = [{"id": it.get("id"), "name": it.get("name")} for it in all_items]
+    try:
+        with open(LEAGUES_FILE, "w", encoding="utf-8") as f:
+            json.dump(slim, f, indent=4, ensure_ascii=False)
+        logging.info(f"Sauvegardé {len(slim)} ligues dans {LEAGUES_FILE}")
+    except Exception as e:
+        logging.error(f"Erreur sauvegarde ligues : {e}")
+
+    global LEAGUES_LIST, LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK
+    LEAGUES_LIST = slim
+    LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK = _league_rank_maps(slim)
+    return slim
+
+
+def member_league_rank(m: dict) -> int:
+    """Rang (grade) de la ligue d'un membre, 0 si non classé/inconnu."""
+    lg = m.get("league") or {}
+    lid = lg.get("id")
+    if lid in LEAGUE_ID_TO_RANK:
+        return LEAGUE_ID_TO_RANK[lid]
+    return LEAGUE_NAME_TO_RANK.get(lg.get("name"), 0)
+
 
 HEADERS   = {"Authorization": f"Bearer {API_TOKEN}", "Accept": "application/json"}
 
@@ -659,14 +777,17 @@ def filter_player(m: dict) -> bool:
     if m.get("expLevel", 0) < cfg.get("min_xp", 0):
         return False
         
-    # Vérification Ligue
-    league_name = m.get("league", {}).get("name", "Unranked")
+    # Vérification Ligue (non-classés)
+    league_name = (m.get("league") or {}).get("name", "Unranked")
     if cfg.get("exclude_unranked", False) and league_name == "Unranked":
         return False
-        
-    # Vérification Trophées
-    if m.get("trophies", 0) < cfg.get("min_trophies", 0):
-        return False
+
+    # Vérification GRADE (ligue minimale) — remplace l'ancien filtre trophées.
+    min_league_id = cfg.get("min_league_id", 0)
+    if min_league_id:
+        min_rank = LEAGUE_ID_TO_RANK.get(min_league_id)
+        if min_rank is not None and member_league_rank(m) < min_rank:
+            return False
 
     # Vérification Dons (Activité)
     don = m.get("donations", 0)
@@ -1064,20 +1185,26 @@ def read_tags_from_txt(path: str = FILE_PLAYER_TAGS) -> list[str]:
         return [line.strip() for line in f if line.strip()]
 
 
-def save_tags_to_txt(tags: list[str], path: str = FILE_PLAYER_TAGS):
+def save_tags_to_txt(tags: list[str], path: str = FILE_PLAYER_TAGS,
+                     overwrite: bool = False):
     """Sauvegarde une liste de tags dans un fichier texte (un par ligne).
-    Fusionne avec les tags déjà présents pour éviter les pertes en cas de scan parallèle."""
-    # Charger les tags existants
-    existing = set()
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            existing = {line.strip() for line in f if line.strip()}
 
-    # Fusionner avec les nouveaux
-    merged = existing | set(tags)
+    - overwrite=False (défaut) : FUSIONNE avec les tags déjà présents (utile
+      pendant la phase de collecte, pour ne rien perdre en cas de scan parallèle).
+    - overwrite=True : écrit EXACTEMENT la liste fournie (remplace le fichier).
+      Indispensable après une invitation pour que le tag invité soit réellement
+      RETIRÉ du fichier (une fusion le réintroduirait à chaque sauvegarde)."""
+    if overwrite:
+        final = set(tags)
+    else:
+        existing = set()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                existing = {line.strip() for line in f if line.strip()}
+        final = existing | set(tags)
 
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(sorted(merged)))
+        f.write("\n".join(sorted(final)))
 
 
 # =============================================================================
@@ -1233,7 +1360,9 @@ def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
                     return
                 automate_coc_input(tag)
                 tags.remove(tag)
-                save_tags_to_txt(tags)
+                # overwrite=True : le tag invité est RÉELLEMENT retiré du fichier
+                # (une fusion l'aurait réintroduit à chaque itération).
+                save_tags_to_txt(tags, overwrite=True)
                 
                 if progress_callback:
                     # Progression 90 -> 100% pour l'invitation

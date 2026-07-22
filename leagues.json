@@ -1,0 +1,94 @@
+[
+    {
+        "id": 29000000,
+        "name": "Unranked"
+    },
+    {
+        "id": 29000001,
+        "name": "Bronze League III"
+    },
+    {
+        "id": 29000002,
+        "name": "Bronze League II"
+    },
+    {
+        "id": 29000003,
+        "name": "Bronze League I"
+    },
+    {
+        "id": 29000004,
+        "name": "Silver League III"
+    },
+    {
+        "id": 29000005,
+        "name": "Silver League II"
+    },
+    {
+        "id": 29000006,
+        "name": "Silver League I"
+    },
+    {
+        "id": 29000007,
+        "name": "Gold League III"
+    },
+    {
+        "id": 29000008,
+        "name": "Gold League II"
+    },
+    {
+        "id": 29000009,
+        "name": "Gold League I"
+    },
+    {
+        "id": 29000010,
+        "name": "Crystal League III"
+    },
+    {
+        "id": 29000011,
+        "name": "Crystal League II"
+    },
+    {
+        "id": 29000012,
+        "name": "Crystal League I"
+    },
+    {
+        "id": 29000013,
+        "name": "Master League III"
+    },
+    {
+        "id": 29000014,
+        "name": "Master League II"
+    },
+    {
+        "id": 29000015,
+        "name": "Master League I"
+    },
+    {
+        "id": 29000016,
+        "name": "Champion League III"
+    },
+    {
+        "id": 29000017,
+        "name": "Champion League II"
+    },
+    {
+        "id": 29000018,
+        "name": "Champion League I"
+    },
+    {
+        "id": 29000019,
+        "name": "Titan League III"
+    },
+    {
+        "id": 29000020,
+        "name": "Titan League II"
+    },
+    {
+        "id": 29000021,
+        "name": "Titan League I"
+    },
+    {
+        "id": 29000022,
+        "name": "Legend League"
+    }
+]

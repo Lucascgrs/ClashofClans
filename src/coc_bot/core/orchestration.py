@@ -256,7 +256,6 @@ def run_attack(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
 
     attack_session.run_attack_session(
         accounts,
-        defaites=int(cfg.get("defaites", 0)),
         attaques=int(cfg.get("attaques", 0)),
         attaques_night=int(cfg.get("attaques_night", 0)),
         strategy_file=cfg.get("strategy_file") or None,

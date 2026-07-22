@@ -184,8 +184,14 @@ class CocBotApp(ctk.CTk):
         self._action_observers.append(callback)
         callback(self.action_files)
 
-    def refresh_action_files(self):
-        """Recharge la liste des macros ``Actions/`` (sous-dossiers inclus)."""
+    def refresh_action_files(self, force: bool = False):
+        """Recharge la liste des macros ``Actions/`` (sous-dossiers inclus).
+
+        Ne notifie les observateurs (qui reconstruisent des listes dans
+        plusieurs écrans) QUE si la liste a réellement changé. Sans ce garde-fou,
+        chaque passage sur l'Accueil déclenchait une reconstruction inutile des
+        listes de macros de tous les écrans — d'où des saccades au changement
+        d'onglet."""
         import os
         actions_dir = str(paths.ACTIONS_DIR)
         files: list[str] = []
@@ -195,6 +201,8 @@ class CocBotApp(ctk.CTk):
                     rel = os.path.relpath(os.path.join(root, f), actions_dir)
                     files.append(rel.replace(os.sep, "/"))
         files.sort()
+        if not force and files == self.action_files:
+            return files  # inchangé : on évite la reconstruction des écrans
         self.action_files = files
         for cb in self._action_observers:
             try:

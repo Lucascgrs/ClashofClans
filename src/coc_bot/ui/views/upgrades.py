@@ -36,7 +36,8 @@ class UpgradesView(BaseView):
         self.v_keep   = tk.IntVar(value=max(0, int(p.get("keep_workers_free", 0))))
         self.v_max    = tk.IntVar(value=int(p.get("max_upgrades", 10)))
         self.v_scrolls = tk.IntVar(value=int(p.get("max_scrolls", 8)))
-        self.v_scamt  = tk.IntVar(value=int(p.get("scroll_amount", -3)))
+        self.v_scamt  = tk.IntVar(value=int(p.get("scroll_amount", -210)))
+        self.v_debug  = tk.BooleanVar(value=bool(p.get("debug_ocr", False)))
 
         # --- Types autorisés -------------------------------------------
         types = Card(body, title="Types d'améliorations autorisés")
@@ -110,6 +111,12 @@ class UpgradesView(BaseView):
         ctk.CTkButton(arow, text="🛑 STOP", command=self._stop,
                       fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER
                       ).pack(side="left", pady=2)
+        drow = ctk.CTkFrame(actions.body, fg_color="transparent")
+        drow.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+        ctk.CTkCheckBox(
+            drow, variable=self.v_debug,
+            text="🐞 Debug OCR — enregistre à chaque lecture la capture FILTRÉE "
+                 "vue par l'OCR (dossier debug_ocr/)").pack(side="left")
 
         # --- Journal ---------------------------------------------------
         logc = Card(body, title="Journal")
@@ -146,6 +153,7 @@ class UpgradesView(BaseView):
             "max_upgrades": max(1, int(self.v_max.get())),
             "max_scrolls": max(0, int(self.v_scrolls.get())),
             "scroll_amount": int(self.v_scamt.get()),
+            "debug_ocr": bool(self.v_debug.get()),
         })
         return cfg
 
@@ -158,7 +166,8 @@ class UpgradesView(BaseView):
         self.v_keep.set(max(0, int(p.get("keep_workers_free", 0))))
         self.v_max.set(int(p.get("max_upgrades", 10)))
         self.v_scrolls.set(int(p.get("max_scrolls", 8)))
-        self.v_scamt.set(int(p.get("scroll_amount", -3)))
+        self.v_scamt.set(int(p.get("scroll_amount", -210)))
+        self.v_debug.set(bool(p.get("debug_ocr", False)))
 
     def _save_params(self):
         cfg = self._collect_params()

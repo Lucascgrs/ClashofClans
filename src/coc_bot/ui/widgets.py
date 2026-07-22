@@ -18,6 +18,7 @@ fenêtres Win32 natives (pas l'ancien rendu ttk), cohérentes avec un look moder
 from __future__ import annotations
 
 import json
+import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Optional
 
@@ -109,15 +110,22 @@ class SelectList(ctk.CTkScrollableFrame):
         self._selected: set[int] = set()
 
     def set_items(self, values) -> None:
+        """Met à jour la liste en RÉUTILISANT les boutons existants.
+
+        Recréer tous les widgets à chaque rafraîchissement était la principale
+        cause de saccades (jusqu'à plusieurs centaines de ``CTkButton`` détruits
+        puis recréés). On ne crée/détruit désormais que le delta et on se
+        contente de reconfigurer le texte des boutons conservés — l'index
+        capturé par chaque commande reste valable puisqu'il est positionnel."""
         prev = set(self._selected)
-        for b in self._buttons:
-            b.destroy()
-        self._buttons.clear()
-        self._selected.clear()
         self._values = list(values)
-        for i, v in enumerate(self._values):
+        n = len(self._values)
+
+        # Crée les boutons manquants (positions stables → commandes réutilisables).
+        while len(self._buttons) < n:
+            i = len(self._buttons)
             b = ctk.CTkButton(
-                self, text=str(v), anchor="w", height=30, corner_radius=6,
+                self, text="", anchor="w", height=30, corner_radius=6,
                 fg_color="transparent", text_color=("gray10", "gray90"),
                 hover_color=("#E5E5E5", "#2A2D35"), font=theme.font_body(),
                 command=lambda idx=i: self._on_click(idx))
@@ -125,8 +133,17 @@ class SelectList(ctk.CTkScrollableFrame):
             if self.on_double is not None:
                 b.bind("<Double-Button-1>", lambda e, idx=i: self.on_double(idx))
             self._buttons.append(b)
+
+        # Détruit les boutons en trop.
+        while len(self._buttons) > n:
+            self._buttons.pop().destroy()
+
+        # Reconfigure le libellé des boutons conservés.
+        for i, v in enumerate(self._values):
+            self._buttons[i].configure(text=str(v))
+
         # conserve la sélection si les indices existent encore
-        self._selected = {i for i in prev if i < len(self._values)}
+        self._selected = {i for i in prev if i < n}
         self._restyle()
 
     def _on_click(self, i: int) -> None:
@@ -151,6 +168,92 @@ class SelectList(ctk.CTkScrollableFrame):
         self._restyle()
 
     def selected_indices(self) -> list[int]:
+        return sorted(self._selected)
+
+    def selection(self) -> list:
+        return [self._values[i] for i in self.selected_indices()]
+
+    def selected_one(self):
+        idxs = self.selected_indices()
+        return self._values[idxs[0]] if idxs else None
+
+
+class FastMultiSelect(ctk.CTkFrame):
+    """Liste (multi-)sélectionnable haute performance pour les LONGUES listes.
+
+    Contrairement à :class:`SelectList` (un ``CTkButton`` par élément — lourd
+    au-delà de quelques dizaines d'entrées et relayouté à chaque changement
+    d'onglet), ce widget s'appuie sur une ``tk.Listbox`` native, capable
+    d'afficher des centaines d'éléments sans latence, avec défilement intégré.
+    Il expose la même API que :class:`SelectList` (``set_items``, ``selection``,
+    ``select_all``…) pour rester interchangeable. Utilisé pour la liste des pays.
+    """
+
+    def __init__(self, master, multi: bool = True, height: int = 150, **kwargs):
+        kwargs.setdefault("fg_color", ("#FFFFFF", "#1E2026"))
+        kwargs.setdefault("corner_radius", 8)
+        super().__init__(master, **kwargs)
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.multi = multi
+        self._values: list = []
+        self._selected: set[int] = set()
+        self._syncing = False
+
+        dark = ctk.get_appearance_mode() == "Dark"
+        bg = "#1E2026" if dark else "#FFFFFF"
+        fg = "#E6E6E6" if dark else "#1A1A1A"
+        sel_bg = theme.ACCENT[1] if dark else theme.ACCENT[0]
+        rows = max(4, int(height / 20))
+
+        self._lb = tk.Listbox(
+            self, activestyle="none", height=rows,
+            selectmode=("extended" if multi else "browse"),
+            bg=bg, fg=fg, highlightthickness=0, borderwidth=0,
+            selectbackground=sel_bg, selectforeground="#101010",
+            font=("Segoe UI", 10), exportselection=False)
+        self._lb.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        sb = ctk.CTkScrollbar(self, command=self._lb.yview)
+        sb.grid(row=0, column=1, sticky="ns", pady=6, padx=(0, 4))
+        self._lb.configure(yscrollcommand=sb.set)
+        self._lb.bind("<<ListboxSelect>>", self._on_select)
+
+    def set_items(self, values) -> None:
+        prev = set(self._selected)
+        self._values = list(values)
+        self._syncing = True
+        self._lb.delete(0, "end")
+        for v in self._values:
+            self._lb.insert("end", str(v))
+        self._syncing = False
+        self._selected = {i for i in prev if i < len(self._values)}
+        self._restyle()
+
+    def _on_select(self, _event=None) -> None:
+        if not self._syncing:
+            self._selected = set(self._lb.curselection())
+
+    def _restyle(self) -> None:
+        """Applique ``self._selected`` sur la Listbox (sélection programmée)."""
+        self._syncing = True
+        self._lb.selection_clear(0, "end")
+        for i in self._selected:
+            if 0 <= i < len(self._values):
+                self._lb.selection_set(i)
+        self._syncing = False
+
+    def select_all(self) -> None:
+        self._selected = set(range(len(self._values)))
+        self._restyle()
+
+    def clear_selection(self) -> None:
+        self._selected = set()
+        self._restyle()
+
+    def selected_indices(self) -> list[int]:
+        cur = self._lb.curselection()
+        if cur:
+            self._selected = set(cur)
         return sorted(self._selected)
 
     def selection(self) -> list:

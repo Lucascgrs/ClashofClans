@@ -5,11 +5,15 @@ attack_config.json. Les comptes sont décrits par un dictionnaire :
 
     {
         "name": "Lucas",
-        "switch_file":       "switch_lucas_.json",
-        "first_army_file":   "selectfirstarmy.json",   # ou None
-        "second_army_file":  "selectsecondarmy.json",  # ou None
-        "switch_army":       false                     # change d'armée avant la nuit
+        "switch_file":    "switch_lucas_.json",
+        "army_file":      "selectarmy.json",       # armée unique (ou "")
+        "to_night_file":  "clicnightboat.json",    # passage village principal -> nuit
+        "to_main_file":   "clicnormalboat.json"    # retour nuit -> village principal
     }
+
+`to_night_file` est exécuté AVANT les attaques de nuit (passage au village de la
+nuit) ; `to_main_file` est exécuté APRÈS les attaques de nuit pour TOUJOURS
+revenir au village principal (on ne reste jamais sur le village de la nuit).
 
 Aucun nom de compte n'est codé en dur dans ce module.
 """
@@ -30,9 +34,8 @@ from ..paths import ATTACK_CONFIG_FILE
 ATTACK_DEFAULT_CONFIG = {
     "actions": {
         "neutral_click":       "cliclefttop.json",
-        "default_first_army":  "selectfirstarmy.json",
-        "default_second_army": "selectsecondarmy.json",
-        "lose":                "lose.json",
+        "default_army":        "selectfirstarmy.json",
+        # Repli si le compte ne définit pas ses propres macros de bascule village.
         "night_boat":          "clicnightboat.json",
         "normal_boat":         "clicnormalboat.json",
         "night_elexir":        "getnightelexir.json",
@@ -92,7 +95,6 @@ def _play(filename: Optional[str]) -> bool:
 def run_attack_session(
     accounts: Iterable[dict],
     *,
-    defaites: int = 0,
     attaques: int = 0,
     attaques_night: int = 0,
     strategy_file: Optional[str] = None,
@@ -171,23 +173,13 @@ def run_attack_session(
         _isleep(delays["after_switch"])
         _play(neutral)
 
-        # Armée principale
-        first_army = acc.get("first_army_file") or actions.get("default_first_army")
-        if _play(first_army):
+        # Sélection de l'armée (armée unique). `first_army_file` accepté pour
+        # rétro-compatibilité avec d'anciennes configurations.
+        army_file = (acc.get("army_file") or acc.get("first_army_file")
+                     or actions.get("default_army"))
+        if _play(army_file):
             _play(neutral)
             _isleep(delays["after_army_select"])
-
-        # Phase défaites
-        lose_file = actions.get("lose")
-        if defaites > 0 and lose_file:
-            log(f"[{name}] {defaites} défaite(s)…")
-            for _ in range(defaites):
-                if _stop():
-                    return
-                _play(lose_file)
-                _isleep(delays["after_attack"])
-                _play(neutral)
-                _maybe_walls()
 
         # Phase attaques jour
         if attaques > 0 and strategy_file:
@@ -200,28 +192,29 @@ def run_attack_session(
                 _play(neutral)
                 _maybe_walls()
 
-        # Changement d'armée avant la nuit
-        if acc.get("switch_army"):
-            second_army = acc.get("second_army_file") or actions.get("default_second_army")
-            if _play(second_army):
-                _isleep(delays["after_army_select"])
-
-        # Phase attaques nuit
+        # Phase attaques nuit — passage au village de la nuit via la macro du
+        # compte (repli : night_boat), puis retour TOUJOURS au village principal.
         if attaques_night > 0 and night_strategy_file:
             log(f"[{name}] {attaques_night} attaque(s) nuit avec {night_strategy_file}…")
-            if _play(actions.get("night_boat")):
+            to_night = acc.get("to_night_file") or actions.get("night_boat")
+            if _play(to_night):
                 _isleep(delays["after_night_boat"])
-            for _ in range(attaques_night):
-                if _stop():
-                    return
-                _play(night_strategy_file)
-                _isleep(delays["after_night_attack"])
-                _play(neutral)
-                _isleep(delays["after_night_attack"])
-                _play(actions.get("night_elexir"))  # facultatif
-                _maybe_walls()
-            _isleep(delays.get("before_normal_boat", 2.0))
-            if _play(actions.get("normal_boat")):
-                _isleep(delays.get("after_normal_boat", 3.0))
+            try:
+                for _ in range(attaques_night):
+                    if _stop():
+                        return
+                    _play(night_strategy_file)
+                    _isleep(delays["after_night_attack"])
+                    _play(neutral)
+                    _isleep(delays["after_night_attack"])
+                    _play(actions.get("night_elexir"))  # facultatif
+                    _maybe_walls()
+            finally:
+                # On ne reste JAMAIS sur le village de la nuit : retour principal
+                # même en cas d'arrêt/interruption pendant la phase de nuit.
+                _isleep(delays.get("before_normal_boat", 2.0))
+                to_main = acc.get("to_main_file") or actions.get("normal_boat")
+                if _play(to_main):
+                    _isleep(delays.get("after_normal_boat", 3.0))
 
     log("=== Session d'attaques terminée ===")

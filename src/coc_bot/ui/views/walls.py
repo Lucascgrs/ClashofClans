@@ -36,7 +36,7 @@ class WallsView(BaseView):
 
         self.v_keyword    = tk.StringVar(value=p.get("keyword", "rempart"))
         self.v_max_scroll = tk.IntVar(value=int(p.get("max_scrolls", 8)))
-        self.v_scroll_amt = tk.IntVar(value=int(p.get("scroll_amount", -3)))
+        self.v_scroll_amt = tk.IntVar(value=int(p.get("scroll_amount", -210)))
         self.v_d_click    = tk.DoubleVar(value=float(p.get("delay_click", 0.6)))
         self.v_d_menu     = tk.DoubleVar(value=float(p.get("delay_open_menu", 1.5)))
         self.v_d_valid    = tk.DoubleVar(value=float(p.get("delay_validate", 1.2)))

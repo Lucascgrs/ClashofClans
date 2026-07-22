@@ -14,7 +14,7 @@ from ... import paths
 from ...core import orchestration
 from .. import theme
 from ..base_view import BaseView
-from ..widgets import Card, SelectList, CoordsCaptureDialog, hint_label
+from ..widgets import Card, FastMultiSelect, CoordsCaptureDialog, hint_label
 
 
 # Sous-ensemble de locationId francophones (repris de l'ancienne interface).
@@ -26,9 +26,56 @@ FRANCOPHONE_IDS = {
 
 # Valeurs par défaut des filtres (identiques à coc_api.FILTER_CONFIG).
 DEFAULT_FILTERS = {
-    "min_townhall": 13, "min_xp": 0, "min_trophies": 0, "min_donations": 0,
+    "min_townhall": 13, "min_xp": 0, "min_league_id": 0, "min_donations": 0,
     "exclude_unranked": True, "require_activity": True,
 }
+
+# Libellé « pas de filtre de grade ».
+NO_LEAGUE = "(Aucun)"
+
+# Liste de repli des ligues (classiques, ordonnées) si leagues.json est absent.
+# Le bouton « MAJ Ligues (API) » remplace cette liste par la liste réelle et à
+# jour (nouveau système de ligues classées numérotées inclus).
+FALLBACK_LEAGUES = [
+    {"id": 29000000, "name": "Unranked"},
+    {"id": 29000001, "name": "Bronze League III"},
+    {"id": 29000002, "name": "Bronze League II"},
+    {"id": 29000003, "name": "Bronze League I"},
+    {"id": 29000004, "name": "Silver League III"},
+    {"id": 29000005, "name": "Silver League II"},
+    {"id": 29000006, "name": "Silver League I"},
+    {"id": 29000007, "name": "Gold League III"},
+    {"id": 29000008, "name": "Gold League II"},
+    {"id": 29000009, "name": "Gold League I"},
+    {"id": 29000010, "name": "Crystal League III"},
+    {"id": 29000011, "name": "Crystal League II"},
+    {"id": 29000012, "name": "Crystal League I"},
+    {"id": 29000013, "name": "Master League III"},
+    {"id": 29000014, "name": "Master League II"},
+    {"id": 29000015, "name": "Master League I"},
+    {"id": 29000016, "name": "Champion League III"},
+    {"id": 29000017, "name": "Champion League II"},
+    {"id": 29000018, "name": "Champion League I"},
+    {"id": 29000019, "name": "Titan League III"},
+    {"id": 29000020, "name": "Titan League II"},
+    {"id": 29000021, "name": "Titan League I"},
+    {"id": 29000022, "name": "Legend League"},
+]
+
+
+def _load_leagues() -> list:
+    """Charge la liste ordonnée des ligues depuis leagues.json (hors-ligne,
+    sans importer coc_api). Repli : les ligues classiques."""
+    path = paths.LEAGUES_FILE
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data:
+                return [{"id": it.get("id"), "name": it.get("name")} for it in data]
+        except Exception:
+            pass
+    return [dict(lg) for lg in FALLBACK_LEAGUES]
 
 
 def _load_locations() -> dict:
@@ -52,6 +99,7 @@ class ScanView(BaseView):
     def build(self):
         self.locations = _load_locations()
         self.country_names = sorted(self.locations.keys())
+        self._load_league_options()
 
         self.make_header()
         body = self.scroll_body()
@@ -60,7 +108,6 @@ class ScanView(BaseView):
         self.vars = {
             "min_townhall": tk.IntVar(value=DEFAULT_FILTERS["min_townhall"]),
             "min_xp": tk.IntVar(value=DEFAULT_FILTERS["min_xp"]),
-            "min_trophies": tk.IntVar(value=DEFAULT_FILTERS["min_trophies"]),
             "min_donations": tk.IntVar(value=DEFAULT_FILTERS["min_donations"]),
             "exclude_unranked": tk.BooleanVar(value=DEFAULT_FILTERS["exclude_unranked"]),
             "require_activity": tk.BooleanVar(value=DEFAULT_FILTERS["require_activity"]),
@@ -71,13 +118,14 @@ class ScanView(BaseView):
             "rand_do_search": tk.BooleanVar(value=True),
             "rand_do_invite": tk.BooleanVar(value=False),
         }
+        # Grade minimum (ligue) — optionnel, remplace l'ancien « Trophées min ».
+        self.v_min_league = tk.StringVar(value=NO_LEAGUE)
 
         filters = Card(body, title="Filtres de recherche joueurs")
         filters.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         grid = ctk.CTkFrame(filters.body, fg_color="transparent")
         grid.grid(row=0, column=0, sticky="ew")
         for i, (label, key) in enumerate([("HDV min", "min_townhall"), ("XP min", "min_xp"),
-                                          ("Trophées min", "min_trophies"),
                                           ("Dons min", "min_donations")]):
             cell = ctk.CTkFrame(grid, fg_color="transparent")
             cell.grid(row=0, column=i, sticky="ew", padx=(0, theme.PAD))
@@ -85,6 +133,15 @@ class ScanView(BaseView):
             ctk.CTkLabel(cell, text=label, font=theme.font_small(),
                          text_color=theme.MUTED, anchor="w").pack(fill="x")
             ctk.CTkEntry(cell, textvariable=self.vars[key]).pack(fill="x")
+        # 4e cellule : grade minimum (ligue) — menu déroulant optionnel.
+        gcell = ctk.CTkFrame(grid, fg_color="transparent")
+        gcell.grid(row=0, column=3, sticky="ew")
+        grid.columnconfigure(3, weight=1, uniform="f")
+        ctk.CTkLabel(gcell, text="Grade min (ligue)", font=theme.font_small(),
+                     text_color=theme.MUTED, anchor="w").pack(fill="x")
+        self.cb_min_league = ctk.CTkComboBox(gcell, variable=self.v_min_league,
+                                             values=[NO_LEAGUE] + self.league_names)
+        self.cb_min_league.pack(fill="x")
         chk = ctk.CTkFrame(filters.body, fg_color="transparent")
         chk.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
         ctk.CTkCheckBox(chk, text="Exclure les non-classés",
@@ -97,7 +154,7 @@ class ScanView(BaseView):
                          subtitle="Sélection multiple.")
         countries.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         countries.body.rowconfigure(0, weight=1)
-        self.country_list = SelectList(countries.body, multi=True, height=150)
+        self.country_list = FastMultiSelect(countries.body, multi=True, height=150)
         self.country_list.grid(row=0, column=0, sticky="nsew")
         self.country_list.set_items(self.country_names)
         if "France" in self.country_names:
@@ -112,7 +169,9 @@ class ScanView(BaseView):
         ctk.CTkButton(crow, text="🇫🇷 Francophones", width=140,
                       command=self._select_francophone).pack(side="left", padx=(0, 6))
         ctk.CTkButton(crow, text="🌐 MAJ Pays (API)", width=150,
-                      command=self._update_locations).pack(side="left")
+                      command=self._update_locations).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(crow, text="🏆 MAJ Ligues (API)", width=150,
+                      command=self._update_leagues).pack(side="left")
 
         # --- Scan incrémental ------------------------------------------
         scan = Card(body, title="Scan incrémental (Méthode 1)")
@@ -191,12 +250,27 @@ class ScanView(BaseView):
         except Exception:
             pass
 
+    def _load_league_options(self):
+        """Prépare la liste ordonnée des ligues et le mapping nom → id."""
+        self.leagues = _load_leagues()
+        self.league_names = [lg["name"] for lg in self.leagues if lg.get("name")]
+        self.league_name_to_id = {lg["name"]: lg.get("id") for lg in self.leagues
+                                  if lg.get("name")}
+
+    def _selected_min_league_id(self) -> int:
+        """Id de la ligue minimale choisie (0 = pas de filtre de grade)."""
+        name = self.v_min_league.get()
+        if not name or name == NO_LEAGUE:
+            return 0
+        return int(self.league_name_to_id.get(name, 0) or 0)
+
     def _apply_filters(self):
         """Importe coc_api (paresseux) et applique les filtres/pays de l'UI."""
         from ...core import coc_api as COC
-        for key in ("min_townhall", "min_xp", "min_trophies", "min_donations",
+        for key in ("min_townhall", "min_xp", "min_donations",
                     "exclude_unranked", "require_activity"):
             COC.FILTER_CONFIG[key] = self.vars[key].get()
+        COC.FILTER_CONFIG["min_league_id"] = self._selected_min_league_id()
         ids = self._selected_location_ids()
         COC.FILTER_CONFIG["location_ids"] = ids
         COC.FILTER_CONFIG["location_id"] = ids[0]
@@ -284,6 +358,27 @@ class ScanView(BaseView):
 
         threading.Thread(target=task, daemon=True).start()
 
+    def _update_leagues(self):
+        def task():
+            self.app.log("Mise à jour des ligues (API)… Patientez…")
+            try:
+                from ...core import coc_api as COC
+                COC.fetch_all_leagues()
+                self._load_league_options()
+                current = self.v_min_league.get()
+
+                def refresh_combo():
+                    self.cb_min_league.configure(values=[NO_LEAGUE] + self.league_names)
+                    if current not in self.league_names:
+                        self.v_min_league.set(NO_LEAGUE)
+                self.after(0, refresh_combo)
+                self.app.log(f"Terminé : {len(self.league_names)} ligues chargées.")
+                messagebox.showinfo("Succès", "Liste des ligues (grades) mise à jour !")
+            except Exception as e:
+                self.app.log(f"Erreur MAJ Ligues : {e}")
+
+        threading.Thread(target=task, daemon=True).start()
+
     def _configure_coords(self):
         keys = ["profil", "social", "recherchedejoueurs", "fill", "invite", "escape"]
 
@@ -299,12 +394,14 @@ class ScanView(BaseView):
     def _save_orch_config(self):
         from ..widgets import ask_string
         ids = self._selected_location_ids()
+        filters = {k: self.vars[k].get() for k in
+                   ("min_townhall", "min_xp", "min_donations",
+                    "exclude_unranked", "require_activity")}
+        filters["min_league_id"] = self._selected_min_league_id()
         cfg = {
             "type": orchestration.TASK_INVITE, "name": "",
             "mode": self.v_orch_mode.get(),
-            "filters": {k: self.vars[k].get() for k in
-                        ("min_townhall", "min_xp", "min_trophies", "min_donations",
-                         "exclude_unranked", "require_activity")},
+            "filters": filters,
             "location_ids": ids,
             "different_name": self.vars["rand_diff_names"].get(),
             "nb_of_clan_with_the_same_name": self.vars["rand_clans_per_name"].get(),

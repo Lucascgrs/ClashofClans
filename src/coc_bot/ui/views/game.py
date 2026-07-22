@@ -18,19 +18,26 @@ from ..widgets import Card, SelectList, Dialog, ask_string, hint_label
 
 
 DEFAULT_ACCOUNT = {
-    "name": "", "switch_file": "", "first_army_file": "",
-    "second_army_file": "", "switch_army": False,
+    "name": "", "switch_file": "", "army_file": "",
+    "to_night_file": "", "to_main_file": "",
 }
 
 
 def migrate_account(acc: dict) -> dict:
-    """Convertit l'ancien schéma {name, file} vers le nouveau."""
-    out = {**DEFAULT_ACCOUNT, **acc}
-    if "file" in out and not out.get("switch_file"):
-        out["switch_file"] = out.pop("file")
-    elif "file" in out:
-        out.pop("file")
-    return out
+    """Convertit les anciens schémas vers le nouveau (armée unique + macros de
+    bascule de village nuit/principal)."""
+    acc = dict(acc or {})
+    # Ancien champ {file} -> switch_file
+    if "file" in acc and not acc.get("switch_file"):
+        acc["switch_file"] = acc["file"]
+    acc.pop("file", None)
+    # Ancienne armée principale -> armée unique
+    if not acc.get("army_file") and acc.get("first_army_file"):
+        acc["army_file"] = acc["first_army_file"]
+    # Champs obsolètes (armée secondaire, bascule d'armée) supprimés
+    for obsolete in ("first_army_file", "second_army_file", "switch_army"):
+        acc.pop(obsolete, None)
+    return {**DEFAULT_ACCOUNT, **acc}
 
 
 class GameView(BaseView):
@@ -105,11 +112,9 @@ class GameView(BaseView):
 
         counts = ctk.CTkFrame(atk.body, fg_color="transparent")
         counts.grid(row=4, column=0, sticky="ew", pady=theme.PAD_S)
-        self.v_nb_lose = tk.IntVar(value=6)
         self.v_nb_atk = tk.IntVar(value=20)
         self.v_nb_night = tk.IntVar(value=9)
-        for i, (label, var) in enumerate([("Défaites", self.v_nb_lose),
-                                          ("Attaques", self.v_nb_atk),
+        for i, (label, var) in enumerate([("Attaques", self.v_nb_atk),
                                           ("Nuit", self.v_nb_night)]):
             ctk.CTkLabel(counts, text=label).grid(row=0, column=i * 2, padx=(0 if i == 0 else theme.PAD, 4))
             ctk.CTkEntry(counts, textvariable=var, width=70).grid(row=0, column=i * 2 + 1)
@@ -210,8 +215,8 @@ class GameView(BaseView):
         bits = [acc.get("name") or "(sans nom)"]
         if acc.get("switch_file"):
             bits.append(f"({acc['switch_file']})")
-        if acc.get("switch_army"):
-            bits.append("⇄ armée")
+        if acc.get("to_night_file") or acc.get("to_main_file"):
+            bits.append("🌙 nuit")
         return "  ".join(bits)
 
     def _refresh_accounts(self):
@@ -242,16 +247,16 @@ class GameView(BaseView):
         action_files = [""] + list(self.app.action_files)
 
         dlg = Dialog(self, "Nouveau compte" if is_new else f"Édition — {acc.get('name', '')}",
-                     width=460, height=360)
+                     width=520, height=420)
         wrap = ctk.CTkFrame(dlg, fg_color="transparent")
         wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
         wrap.columnconfigure(1, weight=1)
 
         v_name = tk.StringVar(value=acc.get("name", ""))
         v_switch = tk.StringVar(value=acc.get("switch_file", ""))
-        v_a1 = tk.StringVar(value=acc.get("first_army_file", ""))
-        v_a2 = tk.StringVar(value=acc.get("second_army_file", ""))
-        v_sw = tk.BooleanVar(value=bool(acc.get("switch_army", False)))
+        v_army = tk.StringVar(value=acc.get("army_file", ""))
+        v_to_night = tk.StringVar(value=acc.get("to_night_file", ""))
+        v_to_main = tk.StringVar(value=acc.get("to_main_file", ""))
 
         def label(r, text):
             ctk.CTkLabel(wrap, text=text, anchor="w").grid(
@@ -261,15 +266,20 @@ class GameView(BaseView):
         ctk.CTkEntry(wrap, textvariable=v_name).grid(row=0, column=1, sticky="ew", pady=6)
         label(1, "Fichier switch :")
         ctk.CTkComboBox(wrap, variable=v_switch, values=action_files).grid(row=1, column=1, sticky="ew", pady=6)
-        label(2, "Armée principale :")
-        ctk.CTkComboBox(wrap, variable=v_a1, values=action_files).grid(row=2, column=1, sticky="ew", pady=6)
-        label(3, "Armée secondaire :")
-        ctk.CTkComboBox(wrap, variable=v_a2, values=action_files).grid(row=3, column=1, sticky="ew", pady=6)
-        ctk.CTkCheckBox(wrap, text="Changer d'armée avant les attaques de nuit",
-                        variable=v_sw).grid(row=4, column=0, columnspan=2, sticky="w", pady=8)
-        hint_label(wrap, "Les fichiers d'armée sont optionnels. Si vides, les valeurs\n"
-                         "par défaut de attack_config.json sont utilisées.").grid(
-            row=5, column=0, columnspan=2, sticky="w")
+        label(2, "Armée :")
+        ctk.CTkComboBox(wrap, variable=v_army, values=action_files).grid(row=2, column=1, sticky="ew", pady=6)
+        label(3, "Village nuit (.json) :")
+        ctk.CTkComboBox(wrap, variable=v_to_night, values=action_files).grid(row=3, column=1, sticky="ew", pady=6)
+        label(4, "Retour village principal (.json) :")
+        ctk.CTkComboBox(wrap, variable=v_to_main, values=action_files).grid(row=4, column=1, sticky="ew", pady=6)
+        hint_label(wrap,
+                   "• Armée : optionnelle (défaut = attack_config.json).\n"
+                   "• Village nuit : macro jouée pour passer du village principal au\n"
+                   "  village de la nuit AVANT les attaques de nuit.\n"
+                   "• Retour village principal : macro jouée APRÈS la nuit — on revient\n"
+                   "  TOUJOURS au village principal (jamais on ne reste sur la nuit).\n"
+                   "  Si vides, les macros par défaut (bateau) sont utilisées.").grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(theme.PAD_S, 0))
 
         def save_and_close():
             name = v_name.get().strip()
@@ -281,9 +291,9 @@ class GameView(BaseView):
                 return
             new_acc = {
                 "name": name, "switch_file": v_switch.get().strip(),
-                "first_army_file": v_a1.get().strip(),
-                "second_army_file": v_a2.get().strip(),
-                "switch_army": bool(v_sw.get()),
+                "army_file": v_army.get().strip(),
+                "to_night_file": v_to_night.get().strip(),
+                "to_main_file": v_to_main.get().strip(),
             }
             if is_new:
                 self.accounts.append(new_acc)
@@ -331,7 +341,7 @@ class GameView(BaseView):
         if not strat:
             messagebox.showwarning("Attention", "Veuillez choisir une stratégie principale.")
             return
-        nb_lose, nb_atk, nb_night = self.v_nb_lose.get(), self.v_nb_atk.get(), self.v_nb_night.get()
+        nb_atk, nb_night = self.v_nb_atk.get(), self.v_nb_night.get()
         strat_night = self.v_strat_night.get()
         walls_every, upg_every = self._rituals()
         stop_event = threading.Event()
@@ -344,7 +354,7 @@ class GameView(BaseView):
                 self.app.log(f"Rituel améliorations activé : toutes les {upg_every} attaques.")
             try:
                 attack_session.run_attack_session(
-                    accounts, defaites=nb_lose, attaques=nb_atk, attaques_night=nb_night,
+                    accounts, attaques=nb_atk, attaques_night=nb_night,
                     strategy_file=strat, night_strategy_file=strat_night,
                     walls_every=walls_every, upgrades_every=upg_every,
                     log_callback=self.app.log, walls_log_callback=self.app.log,
@@ -367,7 +377,7 @@ class GameView(BaseView):
         cfg = {
             "type": orchestration.TASK_ATTACK, "name": "",
             "accounts": [dict(a) for a in accounts],
-            "defaites": self.v_nb_lose.get(), "attaques": self.v_nb_atk.get(),
+            "attaques": self.v_nb_atk.get(),
             "attaques_night": self.v_nb_night.get(), "strategy_file": strat,
             "night_strategy_file": self.v_strat_night.get(),
             "walls_every": walls_every, "upgrades_every": upg_every,
