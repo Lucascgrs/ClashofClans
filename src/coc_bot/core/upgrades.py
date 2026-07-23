@@ -273,12 +273,21 @@ class UpgradesRunner(WallsUpgrader):
         self._click_xy(found[0], found[1], delay=delay)
 
     def _do_building_upgrade(self, click_x: int, click_y: int) -> None:
-        """Processus bâtiment : ligne → 'Améliorer' (localisé par OCR) →
-        'Confirmer' → neutre."""
-        self.log("→ Clic ligne, bouton 'Améliorer' (OCR), bouton 'Confirmer'")
+        """Processus bâtiment : ligne → repli de la liste (« i ») →
+        'Améliorer' (localisé par OCR) → 'Confirmer' → neutre."""
+        self.log("→ Clic ligne, repli liste (« i »), bouton 'Améliorer' (OCR), "
+                 "bouton 'Confirmer'")
         self._click_xy(click_x, click_y, delay=self.cfg["params"]["delay_open_menu"])
+        # La liste des améliorations reste DÉROULÉE et déborde sur le bouton
+        # « Améliorer » : son titre est alors grisé (pas assez blanc) et l'OCR ne
+        # le voit pas. On reclique le « i » (info ouvriers) pour REPLIER la liste
+        # avant de localiser « Améliorer ».
+        self._click_button("info_ouvriers", delay=self.cfg["params"]["delay_open_menu"])
         self._click_ameliorer_zone(delay=self.cfg["params"]["delay_validate"])
         self._click_ubutton("confirmer", delay=self.cfg["params"]["delay_validate"])
+        # Deux clics neutres après la confirmation (ferme la pop-up puis revient
+        # à l'état de liste).
+        self._click_button("clic_neutre")
         self._click_button("clic_neutre")
         self._sleep(self.cfg["params"]["delay_click"])
 

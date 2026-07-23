@@ -223,6 +223,9 @@ class ResearchRunner(UpgradesRunner):
         self.log("→ Clic ligne puis 'Confirmer' (recherche, sans 'Améliorer')")
         self._click_xy(click_x, click_y, delay=self.cfg["params"]["delay_open_menu"])
         self._click_ubutton("confirmer", delay=self.cfg["params"]["delay_validate"])
+        # Deux clics neutres après la confirmation (ferme la pop-up puis revient
+        # à l'état de liste).
+        self._click_button("clic_neutre")
         self._click_button("clic_neutre")
         self._sleep(self.cfg["params"]["delay_click"])
 
