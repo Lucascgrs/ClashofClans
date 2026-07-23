@@ -218,33 +218,47 @@ class UpgradesRunner(WallsUpgrader):
         if not zone or zone.get("x2", 0) <= zone.get("x1", 0):
             raise KeyError("Zone 'ameliorer' non configurée "
                            "(assistant onglet Améliorations).")
-        img, (ox, oy) = self._grab(zone)  # binarisé : texte blanc du bouton
-        if img is None:
+        # Capture COULEUR (pour l'annotation debug) + binarisation pour l'OCR.
+        raw, (ox, oy) = self._grab_color(zone)
+        if raw is None:
             self.log("  ⚠ Capture de la zone 'Améliorer' impossible.")
             return None
-        results = self._readtext(img, "ameliorer")
+        results = self._readtext(self._binarize_white(raw), "ameliorer")
+
+        click = None
+        target_idx = -1
         # 1) Détection UNITAIRE contenant « amélior » → bbox serrée = clic précis
         #    au centre du mot (et non de la ligne « Améliorer + coût »).
-        for bbox, text, _conf in results:
+        for i, (bbox, text, _conf) in enumerate(results):
             if "amelior" in normalize_upgrade_name(text):
                 xs = [p[0] for p in bbox]
                 ys = [p[1] for p in bbox]
-                cx = int((min(xs) + max(xs)) / 2) + ox
-                cy = int((min(ys) + max(ys)) / 2) + oy
-                self.log(f"  → « Améliorer » localisé à ({cx}, {cy}) : '{text}'")
-                return cx, cy
+                click = (int((min(xs) + max(xs)) / 2) + ox,
+                         int((min(ys) + max(ys)) / 2) + oy)
+                target_idx = i
+                self.log(f"  → « Améliorer » localisé à {click} : '{text}'")
+                break
         # 2) Repli : le mot a pu être coupé par l'OCR → on retombe sur la ligne
         #    regroupée qui contient « amélior ».
-        for line in self._group_lines(results, ox, oy):
-            if "amelior" in normalize_upgrade_name(line["text"]):
-                cx = int((line["left"] + line["right"]) / 2)
-                cy = int((line["top"] + line["bot"]) / 2)
-                self.log(f"  → « Améliorer » (ligne entière) à ({cx}, {cy}) "
-                         f": '{line['text']}'")
-                return cx, cy
-        lus = " | ".join(t for _b, t, _c in results) or "(rien)"
-        self.log(f"  ⚠ « Améliorer » non lu dans la zone. Texte OCR : {lus}")
-        return None
+        if click is None:
+            for line in self._group_lines(results, ox, oy):
+                if "amelior" in normalize_upgrade_name(line["text"]):
+                    click = (int((line["left"] + line["right"]) / 2),
+                             int((line["top"] + line["bot"]) / 2))
+                    self.log(f"  → « Améliorer » (ligne entière) à {click} "
+                             f": '{line['text']}'")
+                    break
+
+        # Debug OCR : capture annotée montrant où l'OCR situe « Améliorer » et
+        # où le clic va tomber (comme le debug de la liste des améliorations).
+        if self.debug_ocr:
+            self._save_point_debug(raw, (ox, oy), results, target_idx, click,
+                                   tag="ameliorer")
+
+        if click is None:
+            lus = " | ".join(t for _b, t, _c in results) or "(rien)"
+            self.log(f"  ⚠ « Améliorer » non lu dans la zone. Texte OCR : {lus}")
+        return click
 
     def _click_ameliorer_zone(self, delay=None) -> None:
         """Lit la zone « Améliorer » et clique sur le mot détecté. À défaut

@@ -40,7 +40,6 @@ class ResearchView(BaseView):
         self.v_scrolls = tk.IntVar(value=int(p.get("max_scrolls", 8)))
         self.v_scamt  = tk.IntVar(value=int(p.get("scroll_amount", -210)))
         self.v_debug  = tk.BooleanVar(value=bool(p.get("debug_ocr", False)))
-        self.v_open_lab = tk.StringVar(value=p.get("open_lab_macro", "") or "")
 
         # --- Ressources autorisées -------------------------------------
         types = Card(body, title="Ressources autorisées")
@@ -69,26 +68,11 @@ class ResearchView(BaseView):
             ctk.CTkEntry(cell, textvariable=var).pack(fill="x")
         hint_label(
             params.body,
-            "Ouvrez le LABORATOIRE (liste des recherches) AVANT de lancer.\n"
-            "Choisit la PREMIÈRE recherche lisible, payable (prix blanc) et non en\n"
-            "cours, dont la ressource est cochée, puis : clic ligne → « Confirmer »\n"
-            "(pas de bouton « Améliorer »). Le labo ne mène qu'une recherche à la fois."
+            "La liste s'ouvre via le bouton « i » configuré (assistant). Choisit la\n"
+            "PREMIÈRE recherche lisible, payable (prix blanc) et non en cours, dont\n"
+            "la ressource est cochée, puis : clic ligne → « Confirmer » (pas de\n"
+            "bouton « Améliorer »). Le labo ne mène qu'une recherche à la fois."
         ).grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
-
-        # --- Ouverture du laboratoire (rituel) -------------------------
-        lab = Card(body, title="Ouverture du laboratoire (pour rituel)",
-                   subtitle="Macro qui OUVRE la liste des recherches. Indispensable "
-                            "en rituel (après attaque, le labo n'est pas ouvert).")
-        lab.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
-        self.cb_open_lab = ctk.CTkComboBox(
-            lab.body, variable=self.v_open_lab,
-            values=[""] + list(self.app.action_files), width=320)
-        self.cb_open_lab.grid(row=0, column=0, sticky="w")
-        hint_label(
-            lab.body,
-            "Laissez VIDE en usage standalone (vous ouvrez le labo à la main).\n"
-            "En rituel, choisissez une macro Actions/*.json qui ouvre le laboratoire."
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         # --- Exclusions ------------------------------------------------
         excl = Card(body, title="Recherches à exclure",
@@ -109,7 +93,7 @@ class ResearchView(BaseView):
         conf.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         r1 = ctk.CTkFrame(conf.body, fg_color="transparent")
         r1.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(r1, text="⚙ Définir zone liste, séparateur & Confirmer",
+        ctk.CTkButton(r1, text="⚙ Définir « i », zone liste, séparateur & Confirmer",
                       command=self._wizard).pack(side="left", padx=(0, theme.PAD_S), pady=2)
         ctk.CTkButton(r1, text="📋 Config actuelle", command=self._show_config
                       ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
@@ -181,7 +165,6 @@ class ResearchView(BaseView):
             "max_scrolls": max(0, int(self.v_scrolls.get())),
             "scroll_amount": int(self.v_scamt.get()),
             "debug_ocr": bool(self.v_debug.get()),
-            "open_lab_macro": self.v_open_lab.get().strip(),
             "exclude_list": [ln.strip() for ln
                              in self.txt_exclude.get("1.0", "end-1c").splitlines()
                              if ln.strip()],
@@ -196,7 +179,6 @@ class ResearchView(BaseView):
         self.v_scrolls.set(int(p.get("max_scrolls", 8)))
         self.v_scamt.set(int(p.get("scroll_amount", -210)))
         self.v_debug.set(bool(p.get("debug_ocr", False)))
-        self.v_open_lab.set(p.get("open_lab_macro", "") or "")
         self.txt_exclude.delete("1.0", "end")
         self.txt_exclude.insert("1.0", "\n".join(p.get("exclude_list", []) or []))
 

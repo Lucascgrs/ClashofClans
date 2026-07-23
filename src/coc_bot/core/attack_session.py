@@ -127,8 +127,8 @@ def run_attack_session(
                          les N attaques.
     `research_config`  : instantané de la config de recherche (dict) figé au
                          moment de l'enregistrement ; None = config active. La
-                         config doit définir une macro d'ouverture du labo
-                         (open_lab_macro) pour être utilisable en rituel.
+                         config doit définir le bouton « i » d'ouverture du labo
+                         (info_recherches) pour être utilisable en rituel.
     """
     log: LogCallback = log_callback or print
     cfg = load_attack_config()

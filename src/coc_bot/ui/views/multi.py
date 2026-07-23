@@ -104,14 +104,21 @@ class MultiView(BaseView):
     def _refresh_tree(self):
         self.tree.delete(*self.tree.get_children())
         for i, e in enumerate(self.entries):
-            rit = multi_account.RITUAL_LABELS.get(e.get("ritual", "none"), "?")
-            every = e.get("ritual_every", "") if e.get("ritual") != "none" else ""
-            if e.get("ritual") == "upgrades":
-                cfgname = e.get("upgrades_config") or "(active)"
-            elif e.get("ritual") == "research":
-                cfgname = e.get("research_config") or "(active)"
-            else:
-                cfgname = ""
+            main = e.get("ritual", "none")
+            research_on = bool(e.get("research_enabled"))
+            labels, everys, cfgs = [], [], []
+            if main != "none":
+                labels.append(multi_account.RITUAL_LABELS.get(main, main))
+                everys.append(str(e.get("ritual_every", "")))
+                if main == "upgrades":
+                    cfgs.append(e.get("upgrades_config") or "(active)")
+            if research_on:
+                labels.append("Recherche")
+                everys.append(str(e.get("research_every", "")))
+                cfgs.append("R:" + (e.get("research_config") or "(active)"))
+            rit = " + ".join(labels) or "Aucun"
+            every = " / ".join(everys)
+            cfgname = " ".join(cfgs)
             self.tree.insert("", "end", iid=str(i), text=e.get("name") or "(sans nom)",
                              values=(e.get("switch_file", ""), e.get("army_file", ""),
                                      e.get("attack_file", ""), e.get("nb_attacks", 0),
@@ -217,6 +224,8 @@ class MultiView(BaseView):
         v_every  = tk.IntVar(value=int(entry["ritual_every"]))
         v_ucfg   = tk.StringVar(value=entry["upgrades_config"])
         v_rcfg   = tk.StringVar(value=entry.get("research_config", ""))
+        v_research_enabled = tk.BooleanVar(value=bool(entry.get("research_enabled")))
+        v_research_every   = tk.IntVar(value=int(entry.get("research_every", 5)))
         v_after_enabled = tk.BooleanVar(value=bool(entry.get("after_attack_file")))
         v_after_file    = tk.StringVar(value=entry.get("after_attack_file", ""))
 
@@ -234,18 +243,17 @@ class MultiView(BaseView):
         label(4, "Nb attaques :")
         ctk.CTkEntry(wrap, textvariable=v_nb, width=80).grid(row=4, column=1, sticky="w", pady=6)
 
-        rit = Card(wrap, title="Rituel toutes les X attaques (un seul choix)")
+        # --- Rituel principal : remparts OU améliorations (exclusifs) --
+        rit = Card(wrap, title="Rituel principal toutes les X attaques (remparts OU améliorations)")
         rit.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
         rrow = ctk.CTkFrame(rit.body, fg_color="transparent")
         rrow.grid(row=0, column=0, sticky="w")
         cb_ucfg = ctk.CTkComboBox(rit.body, variable=v_ucfg, values=named_cfgs, width=260)
-        cb_rcfg = ctk.CTkComboBox(rit.body, variable=v_rcfg, values=research_cfgs, width=260)
 
         def update_ritual_state():
             cb_ucfg.configure(state="normal" if v_ritual.get() == "upgrades" else "disabled")
-            cb_rcfg.configure(state="normal" if v_ritual.get() == "research" else "disabled")
 
-        for i, (key, lbl) in enumerate(multi_account.RITUAL_LABELS.items()):
+        for key, lbl in multi_account.MAIN_RITUAL_LABELS.items():
             ctk.CTkRadioButton(rrow, text=lbl, value=key, variable=v_ritual,
                                command=update_ritual_state).pack(side="left", padx=(0, theme.PAD))
         every_row = ctk.CTkFrame(rit.body, fg_color="transparent")
@@ -258,17 +266,38 @@ class MultiView(BaseView):
         cb_ucfg.grid(row=3, column=0, sticky="w")
         ctk.CTkLabel(rit.body, text="(vide = config active de l'écran Améliorations)",
                      font=theme.font_small(), text_color=theme.MUTED).grid(row=4, column=0, sticky="w")
-        ctk.CTkLabel(rit.body, text="Config recherche :", anchor="w").grid(
-            row=5, column=0, sticky="w", pady=(theme.PAD_S, 2))
-        cb_rcfg.grid(row=6, column=0, sticky="w")
-        ctk.CTkLabel(rit.body, text="(vide = config active de l'écran Recherches ; "
-                     "prévoyez une macro d'ouverture du labo dans cette config)",
-                     font=theme.font_small(), text_color=theme.MUTED).grid(row=7, column=0, sticky="w")
         update_ritual_state()
+
+        # --- Recherche : CUMULABLE, avec sa propre fréquence -----------
+        res = Card(wrap, title="Recherche (cumulable — fréquence propre)")
+        res.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
+        cb_rcfg = ctk.CTkComboBox(res.body, variable=v_rcfg, values=research_cfgs, width=260)
+        res_every_row = ctk.CTkFrame(res.body, fg_color="transparent")
+        ent_res_every = ctk.CTkEntry(res_every_row, textvariable=v_research_every, width=60)
+
+        def update_research_state():
+            st = "normal" if v_research_enabled.get() else "disabled"
+            cb_rcfg.configure(state=st)
+            ent_res_every.configure(state=st)
+
+        ctk.CTkCheckBox(res.body, text="Faire une recherche (labo) — cumulable avec le rituel principal",
+                        variable=v_research_enabled, command=update_research_state
+                        ).grid(row=0, column=0, sticky="w")
+        res_every_row.grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
+        ctk.CTkLabel(res_every_row, text="Toutes les").pack(side="left", padx=(0, 6))
+        ent_res_every.pack(side="left")
+        ctk.CTkLabel(res_every_row, text="attaques").pack(side="left", padx=6)
+        ctk.CTkLabel(res.body, text="Config recherche :", anchor="w").grid(
+            row=2, column=0, sticky="w", pady=(theme.PAD_S, 2))
+        cb_rcfg.grid(row=3, column=0, sticky="w")
+        ctk.CTkLabel(res.body, text="(vide = config active de l'écran Recherches ; "
+                     "configurez le bouton « i » d'ouverture du labo dans cette config)",
+                     font=theme.font_small(), text_color=theme.MUTED).grid(row=4, column=0, sticky="w")
+        update_research_state()
 
         # --- Action après chaque attaque -------------------------------
         after = Card(wrap, title="Après chaque attaque")
-        after.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
+        after.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
         cb_after = ctk.CTkComboBox(after.body, variable=v_after_file, values=action_files, width=260)
 
         def update_after_state():
@@ -296,6 +325,8 @@ class MultiView(BaseView):
                 "nb_attacks": max(0, int(v_nb.get())), "ritual": v_ritual.get(),
                 "ritual_every": max(1, int(v_every.get())),
                 "upgrades_config": v_ucfg.get().strip(),
+                "research_enabled": bool(v_research_enabled.get()),
+                "research_every": max(1, int(v_research_every.get())),
                 "research_config": v_rcfg.get().strip(),
                 "after_attack_file": (v_after_file.get().strip()
                                       if v_after_enabled.get() else ""),

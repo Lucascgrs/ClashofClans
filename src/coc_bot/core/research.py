@@ -42,6 +42,10 @@ RESEARCH_DEFAULT_CONFIG = {
         "liste_recherches": {"x1": 700, "y1": 180, "x2": 1263, "y2": 800},
     },
     "buttons": {
+        # Petit « i » d'information qui OUVRE la liste des recherches (comme le
+        # « i » des ouvriers pour les améliorations). {0,0} = non configuré →
+        # liste supposée déjà ouverte (usage standalone).
+        "info_recherches": {"x": 0, "y": 0},
         # Bouton qui LANCE la recherche (affiche le prix) — pas de « Améliorer ».
         "confirmer": {"x": 1150, "y": 700},
     },
@@ -55,10 +59,6 @@ RESEARCH_DEFAULT_CONFIG = {
         "price_split_x":     0,      # barre verticale nom/prix (à configurer)
         "debug_ocr":         False,
         "exclude_list":      [],     # recherches à NE JAMAIS lancer
-        # Macro Actions/*.json OPTIONNELLE ouvrant le laboratoire (liste des
-        # recherches) avant lecture. Indispensable en RITUEL (après attaque, le
-        # labo n'est pas ouvert). Vide = liste supposée déjà ouverte (standalone).
-        "open_lab_macro":    "",
         # Seuils de détection (repris des améliorations, ajustables).
         "symbol_min_pixels":      80,
         "symbol_min_pixels_dark": 250,
@@ -74,9 +74,14 @@ RESEARCH_DEFAULT_CONFIG = {
 # Assistant de configuration propre à la recherche. Le reste (zones de
 # ressources en haut d'écran, boutons remparts) n'est pas nécessaire ici.
 RESEARCH_CONFIG_STEPS = [
+    ("buttons.info_recherches", "point",
+     "Bouton « i » — OUVRIR LES RECHERCHES",
+     "Placez la souris sur le petit « i » d'information qui OUVRE la liste des "
+     "recherches du laboratoire, puis appuyez sur ENTRÉE. C'est ce bouton qui "
+     "sera cliqué pour ouvrir la liste (notamment en rituel après une attaque)."),
     ("zones.liste_recherches", "zone",
      "Zone LISTE DES RECHERCHES (scrollable)",
-     "Ouvrez le laboratoire (liste des recherches) puis délimitez les 2 coins "
+     "Ouvrez la liste des recherches (via le « i ») puis délimitez les 2 coins "
      "(haut-gauche et bas-droit) du rectangle contenant la liste. Le programme "
      "scrollera la molette à l'intérieur de cette zone."),
     ("params.price_split_x", "vline",
@@ -187,16 +192,15 @@ class ResearchRunner(UpgradesRunner):
     # ---------- ouverture : la liste du labo est supposée déjà ouverte ----------
 
     def _open_workers_menu(self) -> None:
-        # Pas de menu ouvriers pour la recherche. Si une macro d'ouverture du
-        # laboratoire est configurée (indispensable en rituel après attaque), on
-        # la joue ; sinon on ne clique PAS (un clic neutre fermerait la liste
-        # déjà ouverte en usage standalone).
-        macro = (self.ucfg["params"].get("open_lab_macro") or "").strip()
-        if macro:
-            from . import attack_session  # import paresseux (évite un cycle)
-            self.log(f"[Recherche] Ouverture du laboratoire via {macro}")
-            attack_session._play(macro)
-            self._sleep(self.cfg["params"]["delay_open_menu"])
+        # Ouvre la liste des recherches en cliquant le petit « i » configuré
+        # (comme le « i » des ouvriers pour les améliorations). Indispensable en
+        # rituel (après attaque, la liste n'est pas ouverte). Si le « i » n'est
+        # pas configuré ({0,0}), on ne clique pas : liste supposée déjà ouverte.
+        b = self.ucfg["buttons"].get("info_recherches") or {}
+        if int(b.get("x", 0)) or int(b.get("y", 0)):
+            self.log("[Recherche] Ouverture de la liste via le bouton « i ».")
+            self._click_ubutton("info_recherches",
+                                delay=self.cfg["params"]["delay_open_menu"])
 
     # ---------- action : ligne → 'Confirmer' (SANS 'Améliorer') ----------
 

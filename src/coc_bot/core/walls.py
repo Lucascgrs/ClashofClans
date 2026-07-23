@@ -232,14 +232,19 @@ class WallsUpgrader:
             img = self._cam.grab(region=(x1, y1, x2, y2))
         return img, (x1, y1)
 
+    def _binarize_white(self, img_rgb):
+        """Binarise une capture : le TEXTE BLANC ressort en blanc sur fond noir
+        (seuil 230). Réutilisé par _grab et par les débogages OCR."""
+        gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY)
+        return thresh
+
     def _grab(self, zone: dict):
         """Capture binarisée d'une zone. Retourne (image, (offset_x, offset_y))."""
         img, (x1, y1) = self._grab_color(zone)
         if img is None:
             return None, (x1, y1)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY)
-        return thresh, (x1, y1)
+        return self._binarize_white(img), (x1, y1)
 
     def _dump_ocr_filter(self, img, tag: str) -> None:
         """Enregistre l'image FILTRÉE telle que la voit l'OCR (mode debug)."""
@@ -531,6 +536,39 @@ class WallsUpgrader:
             self.log(f"  → screenshot lignes sauvegardé : {path}")
         except Exception as e:
             self.log(f"  → erreur sauvegarde debug : {e}")
+
+    def _save_point_debug(self, img_rgb, offset, results, target_idx=-1,
+                          click=None, tag="point") -> None:
+        """Sauvegarde une capture COULEUR annotée d'une zone-bouton lue par OCR :
+        toutes les détections (boîtes vertes + texte), la CIBLE retenue en rouge
+        (index `target_idx`) et le POINT DE CLIC (croix bleue). Sert à voir où
+        l'OCR situe un bouton (ex. « Améliorer ») et où le clic va tomber."""
+        if img_rgb is None:
+            return
+        try:
+            os.makedirs(DEBUG_OCR_DIR, exist_ok=True)
+            ox, oy = offset
+            annotated = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+            for i, (bbox, text, _conf) in enumerate(results):
+                xs = [int(p[0]) for p in bbox]
+                ys = [int(p[1]) for p in bbox]
+                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+                is_target = (i == target_idx)
+                color = (0, 0, 255) if is_target else (0, 200, 0)
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 1 + is_target)
+                cv2.putText(annotated, text, (x1, max(12, y1 - 3)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            if click is not None:
+                cxr, cyr = int(click[0] - ox), int(click[1] - oy)
+                cv2.drawMarker(annotated, (cxr, cyr), (255, 0, 0),
+                               cv2.MARKER_CROSS, 22, 2)
+                cv2.circle(annotated, (cxr, cyr), 7, (255, 0, 0), 2)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(DEBUG_OCR_DIR, f"{tag}_{ts}.png")
+            cv2.imwrite(path, annotated)
+            self.log(f"  → screenshot « {tag} » annoté (clic) : {path}")
+        except Exception as e:
+            self.log(f"  → erreur sauvegarde debug {tag} : {e}")
 
     # ---------- lectures ----------
 

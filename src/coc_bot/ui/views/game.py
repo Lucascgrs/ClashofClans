@@ -122,7 +122,7 @@ class GameView(BaseView):
             ctk.CTkLabel(counts, text=label).grid(row=0, column=i * 2, padx=(0 if i == 0 else theme.PAD, 4))
             ctk.CTkEntry(counts, textvariable=var, width=70).grid(row=0, column=i * 2 + 1)
 
-        # rituels exclusifs (remparts / améliorations / recherche)
+        # Rituels : remparts OU améliorations (exclusifs) ; recherche cumulable.
         self.v_walls_enabled = tk.BooleanVar(value=False)
         self.v_walls_every = tk.IntVar(value=5)
         self.v_upg_enabled = tk.BooleanVar(value=False)
@@ -342,19 +342,18 @@ class GameView(BaseView):
     # Rituels exclusifs
     # =====================================================================
     def _on_walls_toggle(self):
+        # Remparts et améliorations restent EXCLUSIFS entre eux ; la recherche
+        # est cumulable (indépendante), on n'y touche pas.
         if self.v_walls_enabled.get():
             self.v_upg_enabled.set(False)
-            self.v_research_enabled.set(False)
 
     def _on_upg_toggle(self):
         if self.v_upg_enabled.get():
             self.v_walls_enabled.set(False)
-            self.v_research_enabled.set(False)
 
     def _on_research_toggle(self):
-        if self.v_research_enabled.get():
-            self.v_walls_enabled.set(False)
-            self.v_upg_enabled.set(False)
+        # Recherche cumulable : indépendante des remparts / améliorations.
+        pass
 
     def _research_cfg_values(self):
         return [RESEARCH_ACTIVE_LABEL] + research.list_named_configs()
