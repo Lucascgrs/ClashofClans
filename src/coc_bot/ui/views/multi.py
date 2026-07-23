@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from ...core import multi_account, upgrades
+from ...core import multi_account, upgrades, research
 from .. import theme
 from ..base_view import BaseView
 from ..widgets import Card, LogPanel, Dialog, styled_treeview, hint_label
@@ -106,8 +106,12 @@ class MultiView(BaseView):
         for i, e in enumerate(self.entries):
             rit = multi_account.RITUAL_LABELS.get(e.get("ritual", "none"), "?")
             every = e.get("ritual_every", "") if e.get("ritual") != "none" else ""
-            cfgname = (e.get("upgrades_config") or "(active)"
-                       if e.get("ritual") == "upgrades" else "")
+            if e.get("ritual") == "upgrades":
+                cfgname = e.get("upgrades_config") or "(active)"
+            elif e.get("ritual") == "research":
+                cfgname = e.get("research_config") or "(active)"
+            else:
+                cfgname = ""
             self.tree.insert("", "end", iid=str(i), text=e.get("name") or "(sans nom)",
                              values=(e.get("switch_file", ""), e.get("army_file", ""),
                                      e.get("attack_file", ""), e.get("nb_attacks", 0),
@@ -189,11 +193,19 @@ class MultiView(BaseView):
         entry = multi_account.normalize_entry(None if is_new else self.entries[index])
         action_files = [""] + list(self.app.action_files)
         named_cfgs = [""] + upgrades.list_named_configs()
+        research_cfgs = [""] + research.list_named_configs()
 
         dlg = Dialog(self, "Nouveau compte" if is_new else f"Édition — {entry.get('name', '')}",
-                     width=520, height=620)
-        wrap = ctk.CTkFrame(dlg, fg_color="transparent")
-        wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
+                     width=540, height=600, resizable=True)
+
+        # Barre de boutons réservée EN BAS (toujours visible, hors zone
+        # scrollable) : le bouton « Enregistrer » ne peut plus être masqué.
+        bar = ctk.CTkFrame(dlg, fg_color="transparent")
+        bar.pack(side="bottom", fill="x", padx=theme.PAD_L, pady=(0, theme.PAD))
+
+        # Contenu SCROLLABLE : si la fenêtre est trop petite, on fait défiler.
+        wrap = ctk.CTkScrollableFrame(dlg, fg_color="transparent")
+        wrap.pack(side="top", fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
         wrap.columnconfigure(1, weight=1)
 
         v_name   = tk.StringVar(value=entry["name"])
@@ -204,6 +216,7 @@ class MultiView(BaseView):
         v_ritual = tk.StringVar(value=entry["ritual"])
         v_every  = tk.IntVar(value=int(entry["ritual_every"]))
         v_ucfg   = tk.StringVar(value=entry["upgrades_config"])
+        v_rcfg   = tk.StringVar(value=entry.get("research_config", ""))
         v_after_enabled = tk.BooleanVar(value=bool(entry.get("after_attack_file")))
         v_after_file    = tk.StringVar(value=entry.get("after_attack_file", ""))
 
@@ -226,9 +239,11 @@ class MultiView(BaseView):
         rrow = ctk.CTkFrame(rit.body, fg_color="transparent")
         rrow.grid(row=0, column=0, sticky="w")
         cb_ucfg = ctk.CTkComboBox(rit.body, variable=v_ucfg, values=named_cfgs, width=260)
+        cb_rcfg = ctk.CTkComboBox(rit.body, variable=v_rcfg, values=research_cfgs, width=260)
 
         def update_ritual_state():
             cb_ucfg.configure(state="normal" if v_ritual.get() == "upgrades" else "disabled")
+            cb_rcfg.configure(state="normal" if v_ritual.get() == "research" else "disabled")
 
         for i, (key, lbl) in enumerate(multi_account.RITUAL_LABELS.items()):
             ctk.CTkRadioButton(rrow, text=lbl, value=key, variable=v_ritual,
@@ -243,6 +258,12 @@ class MultiView(BaseView):
         cb_ucfg.grid(row=3, column=0, sticky="w")
         ctk.CTkLabel(rit.body, text="(vide = config active de l'écran Améliorations)",
                      font=theme.font_small(), text_color=theme.MUTED).grid(row=4, column=0, sticky="w")
+        ctk.CTkLabel(rit.body, text="Config recherche :", anchor="w").grid(
+            row=5, column=0, sticky="w", pady=(theme.PAD_S, 2))
+        cb_rcfg.grid(row=6, column=0, sticky="w")
+        ctk.CTkLabel(rit.body, text="(vide = config active de l'écran Recherches ; "
+                     "prévoyez une macro d'ouverture du labo dans cette config)",
+                     font=theme.font_small(), text_color=theme.MUTED).grid(row=7, column=0, sticky="w")
         update_ritual_state()
 
         # --- Action après chaque attaque -------------------------------
@@ -275,6 +296,7 @@ class MultiView(BaseView):
                 "nb_attacks": max(0, int(v_nb.get())), "ritual": v_ritual.get(),
                 "ritual_every": max(1, int(v_every.get())),
                 "upgrades_config": v_ucfg.get().strip(),
+                "research_config": v_rcfg.get().strip(),
                 "after_attack_file": (v_after_file.get().strip()
                                       if v_after_enabled.get() else ""),
             }
@@ -286,8 +308,6 @@ class MultiView(BaseView):
             self._refresh_tree()
             dlg.destroy()
 
-        bar = ctk.CTkFrame(dlg, fg_color="transparent")
-        bar.pack(fill="x", padx=theme.PAD_L, pady=(0, theme.PAD))
         ctk.CTkButton(bar, text="Enregistrer", command=save_and_close,
                       fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER).pack(side="right")
         ctk.CTkButton(bar, text="Annuler", command=dlg.destroy, fg_color="transparent",

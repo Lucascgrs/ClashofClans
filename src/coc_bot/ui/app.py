@@ -49,6 +49,7 @@ NAV_ITEMS = [
     ("game",          "🎮", "Jeu & Attaques", "game",          "GameView"),
     ("walls",         "🧱", "Auto Remparts",  "walls",         "WallsView"),
     ("upgrades",      "⬆",  "Améliorations",  "upgrades",      "UpgradesView"),
+    ("research",      "🔬", "Recherches",     "research",      "ResearchView"),
     ("multi",         "👥", "Multi Compte",   "multi",         "MultiView"),
     ("orchestration", "🗂", "Orchestration",  "orchestration", "OrchestrationView"),
     ("data",          "📊", "Données",        "data",          "DataView"),

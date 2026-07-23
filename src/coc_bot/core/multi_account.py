@@ -8,9 +8,10 @@ Chaque compte est décrit par une entrée :
         "army_file":       "armee/selectfirstarmy.json", # macro de sélection d'armée ("" = aucune)
         "attack_file":     "attaque/attaquehdv13.json",  # macro d'attaque
         "nb_attacks":      10,                           # attaques avec ce compte
-        "ritual":          "none",                       # "none" | "walls" | "upgrades" (exclusif)
+        "ritual":          "none",                       # "none" | "walls" | "upgrades" | "research"
         "ritual_every":    5,                            # rituel toutes les N attaques
         "upgrades_config": "",                           # config nommée (si ritual = "upgrades")
+        "research_config": "",                           # config nommée (si ritual = "research")
         "after_attack_file": ""                          # macro rejouée après CHAQUE attaque ("" = aucune)
     }
 
@@ -43,6 +44,7 @@ DEFAULT_ENTRY = {
     "ritual":          "none",
     "ritual_every":    5,
     "upgrades_config": "",
+    "research_config": "",
     "after_attack_file": "",
 }
 
@@ -50,6 +52,7 @@ RITUAL_LABELS = {
     "none":     "Aucun",
     "walls":    "Remparts",
     "upgrades": "Améliorations",
+    "research": "Recherche",
 }
 
 
@@ -121,6 +124,10 @@ def run_multi_session(
             elif kind == "upgrades":
                 UpgradesRunner(log_callback=log, stop_event=stop_event,
                                config_file=entry.get("upgrades_config") or None).run()
+            elif kind == "research":
+                from .research import ResearchRunner  # import paresseux
+                ResearchRunner(log_callback=log, stop_event=stop_event,
+                               config_file=entry.get("research_config") or None).run()
         except Exception as e:
             log(f"Erreur rituel : {e}")
 

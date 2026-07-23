@@ -31,6 +31,7 @@ DATA_DIR: Path = Path(os.environ.get("COC_BOT_DATA_DIR", PROJECT_ROOT)).resolve(
 ACTIONS_DIR: Path = DATA_DIR / "Actions"
 CONFIGS_DIR: Path = DATA_DIR / "Configs"
 UPGRADES_CONFIG_DIR: Path = CONFIGS_DIR / "Upgrades"
+RESEARCH_CONFIG_DIR: Path = CONFIGS_DIR / "Research"
 MULTI_CONFIG_DIR: Path = CONFIGS_DIR / "MultiCompte"
 ORCHESTRATION_DIR: Path = DATA_DIR / "Orchestration"
 DEBUG_OCR_DIR: Path = DATA_DIR / "debug_ocr"
@@ -57,6 +58,7 @@ def ensure_dirs() -> None:
         *(ACTIONS_DIR / sub for sub in ACTION_SUBDIRS),
         CONFIGS_DIR,
         UPGRADES_CONFIG_DIR,
+        RESEARCH_CONFIG_DIR,
         MULTI_CONFIG_DIR,
         ORCHESTRATION_DIR,
     ):
@@ -70,6 +72,7 @@ LOCATIONS_FILE: str = data_path("locations.json")
 LEAGUES_FILE: str = data_path("leagues.json")
 WALLS_CONFIG_FILE: str = data_path("walls_config.json")
 UPGRADES_CONFIG_FILE: str = data_path("upgrades_config.json")
+RESEARCH_CONFIG_FILE: str = data_path("research_config.json")
 ATTACK_CONFIG_FILE: str = data_path("attack_config.json")
 ACCOUNTS_CONFIG_FILE: str = data_path("accounts_config.json")
 MULTI_LAST_FILE: str = data_path("multi_account_config.json")

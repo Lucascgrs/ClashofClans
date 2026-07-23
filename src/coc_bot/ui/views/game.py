@@ -11,7 +11,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from ... import paths
-from ...core import attack_session, orchestration, playback, recorder, upgrades
+from ...core import attack_session, orchestration, playback, recorder, upgrades, research
 from .. import theme
 from ..base_view import BaseView
 from ..widgets import Card, SelectList, Dialog, ask_string, hint_label
@@ -21,6 +21,9 @@ DEFAULT_ACCOUNT = {
     "name": "", "switch_file": "", "army_file": "",
     "to_night_file": "", "to_main_file": "",
 }
+
+# Étiquette « config active » pour le sélecteur de config de recherche.
+RESEARCH_ACTIVE_LABEL = "(active)"
 
 
 def migrate_account(acc: dict) -> dict:
@@ -119,11 +122,14 @@ class GameView(BaseView):
             ctk.CTkLabel(counts, text=label).grid(row=0, column=i * 2, padx=(0 if i == 0 else theme.PAD, 4))
             ctk.CTkEntry(counts, textvariable=var, width=70).grid(row=0, column=i * 2 + 1)
 
-        # rituels exclusifs
+        # rituels exclusifs (remparts / améliorations / recherche)
         self.v_walls_enabled = tk.BooleanVar(value=False)
         self.v_walls_every = tk.IntVar(value=5)
         self.v_upg_enabled = tk.BooleanVar(value=False)
         self.v_upg_every = tk.IntVar(value=5)
+        self.v_research_enabled = tk.BooleanVar(value=False)
+        self.v_research_every = tk.IntVar(value=5)
+        self.v_research_cfg = tk.StringVar(value=RESEARCH_ACTIVE_LABEL)
 
         w = ctk.CTkFrame(atk.body, fg_color="transparent")
         w.grid(row=5, column=0, sticky="ew")
@@ -141,18 +147,29 @@ class GameView(BaseView):
         ctk.CTkEntry(u, textvariable=self.v_upg_every, width=56).pack(side="left", padx=6)
         ctk.CTkLabel(u, text="attaques (config : écran Améliorations)").pack(side="left")
 
+        rs = ctk.CTkFrame(atk.body, fg_color="transparent")
+        rs.grid(row=7, column=0, sticky="ew", pady=(4, 0))
+        ctk.CTkCheckBox(rs, text="Rechercher (labo) toutes les",
+                        variable=self.v_research_enabled, command=self._on_research_toggle
+                        ).pack(side="left")
+        ctk.CTkEntry(rs, textvariable=self.v_research_every, width=56).pack(side="left", padx=6)
+        ctk.CTkLabel(rs, text="attaques — config :").pack(side="left")
+        self.cb_research_cfg = ctk.CTkComboBox(
+            rs, variable=self.v_research_cfg, values=self._research_cfg_values(), width=200)
+        self.cb_research_cfg.pack(side="left", padx=6)
+
         # Action à rejouer après CHAQUE attaque (sortie de situation, coffres…)
         self.v_after_enabled = tk.BooleanVar(value=False)
         self.v_after_file = tk.StringVar()
         aa = ctk.CTkFrame(atk.body, fg_color="transparent")
-        aa.grid(row=7, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+        aa.grid(row=8, column=0, sticky="ew", pady=(theme.PAD_S, 0))
         ctk.CTkCheckBox(aa, text="Effectuer cette action après chaque attaque :",
                         variable=self.v_after_enabled).pack(side="left")
         self.cb_after = ctk.CTkComboBox(aa, variable=self.v_after_file, values=[], width=240)
         self.cb_after.pack(side="left", padx=6)
 
         run = ctk.CTkFrame(atk.body, fg_color="transparent")
-        run.grid(row=8, column=0, sticky="ew", pady=(theme.PAD, 0))
+        run.grid(row=9, column=0, sticky="ew", pady=(theme.PAD, 0))
         ctk.CTkButton(run, text="⚔ LANCER LA SESSION D'ATTAQUE", command=self._run_attack,
                       fg_color=theme.SUCCESS, hover_color=theme.ACCENT_HOVER, height=42
                       ).pack(side="left", padx=(0, theme.PAD_S))
@@ -327,15 +344,37 @@ class GameView(BaseView):
     def _on_walls_toggle(self):
         if self.v_walls_enabled.get():
             self.v_upg_enabled.set(False)
+            self.v_research_enabled.set(False)
 
     def _on_upg_toggle(self):
         if self.v_upg_enabled.get():
             self.v_walls_enabled.set(False)
+            self.v_research_enabled.set(False)
+
+    def _on_research_toggle(self):
+        if self.v_research_enabled.get():
+            self.v_walls_enabled.set(False)
+            self.v_upg_enabled.set(False)
+
+    def _research_cfg_values(self):
+        return [RESEARCH_ACTIVE_LABEL] + research.list_named_configs()
 
     def _rituals(self):
         walls_every = int(self.v_walls_every.get()) if self.v_walls_enabled.get() else 0
         upg_every = int(self.v_upg_every.get()) if self.v_upg_enabled.get() else 0
         return walls_every, upg_every
+
+    def _research_snapshot(self):
+        """(research_every, config_dict) pour le rituel recherche, ou (0, None).
+
+        On EMBARQUE un instantané de la config choisie (fichier nommé ou active)
+        pour retrouver exactement la config au moment de l'enregistrement."""
+        if not self.v_research_enabled.get():
+            return 0, None
+        every = max(1, int(self.v_research_every.get()))
+        sel = (self.v_research_cfg.get() or "").strip()
+        name = None if sel in ("", RESEARCH_ACTIVE_LABEL) else sel
+        return every, research.load_research_config(name)
 
     def _after_attack_file(self):
         """Macro à rejouer après chaque attaque (« » si l'option est décochée)."""
@@ -361,6 +400,7 @@ class GameView(BaseView):
         nb_atk, nb_night = self.v_nb_atk.get(), self.v_nb_night.get()
         strat_night = self.v_strat_night.get()
         walls_every, upg_every = self._rituals()
+        research_every, research_cfg = self._research_snapshot()
         after_atk = self._after_attack_file()
         stop_event = threading.Event()
 
@@ -370,6 +410,8 @@ class GameView(BaseView):
                 self.app.log(f"Rituel remparts activé : toutes les {walls_every} attaques.")
             if upg_every > 0:
                 self.app.log(f"Rituel améliorations activé : toutes les {upg_every} attaques.")
+            if research_every > 0:
+                self.app.log(f"Rituel recherche activé : toutes les {research_every} attaques.")
             if after_atk:
                 self.app.log(f"Action après chaque attaque : {after_atk}")
             try:
@@ -377,6 +419,7 @@ class GameView(BaseView):
                     accounts, attaques=nb_atk, attaques_night=nb_night,
                     strategy_file=strat, night_strategy_file=strat_night,
                     walls_every=walls_every, upgrades_every=upg_every,
+                    research_every=research_every, research_config=research_cfg,
                     after_attack_file=after_atk or None,
                     log_callback=self.app.log, walls_log_callback=self.app.log,
                     stop_event=stop_event)
@@ -395,6 +438,7 @@ class GameView(BaseView):
             messagebox.showwarning("Attention", "Veuillez choisir une stratégie principale.")
             return
         walls_every, upg_every = self._rituals()
+        research_every, research_cfg = self._research_snapshot()
         cfg = {
             "type": orchestration.TASK_ATTACK, "name": "",
             "accounts": [dict(a) for a in accounts],
@@ -402,6 +446,7 @@ class GameView(BaseView):
             "attaques_night": self.v_nb_night.get(), "strategy_file": strat,
             "night_strategy_file": self.v_strat_night.get(),
             "walls_every": walls_every, "upgrades_every": upg_every,
+            "research_every": research_every,
             "after_attack_file": self._after_attack_file(),
         }
         # Instantané de la config d'améliorations (dont la liste d'exclusion)
@@ -409,6 +454,10 @@ class GameView(BaseView):
         # EXACTEMENT ces paramètres, même si l'écran Améliorations change ensuite.
         if upg_every > 0:
             cfg["upgrades_config"] = upgrades.load_upgrades_config()
+        # De même pour la recherche : on fige la config choisie (fichier nommé
+        # ou active) au moment de l'enregistrement.
+        if research_every > 0 and research_cfg is not None:
+            cfg["research_config"] = research_cfg
         name = ask_string(self, "Nom de la configuration",
                           "Nom du fichier de configuration (sans .json) :", "attaque")
         if not name:

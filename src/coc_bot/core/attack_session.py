@@ -101,8 +101,10 @@ def run_attack_session(
     night_strategy_file: Optional[str] = None,
     walls_every: int = 0,
     upgrades_every: int = 0,
+    research_every: int = 0,
     after_attack_file: Optional[str] = None,
     upgrades_config: Optional[dict] = None,
+    research_config: Optional[dict] = None,
     log_callback: Optional[LogCallback] = None,
     walls_log_callback: Optional[LogCallback] = None,
     stop_event=None,
@@ -121,6 +123,12 @@ def run_attack_session(
     `upgrades_config`  : instantané de la config d'améliorations (dict) figé au
                          moment de l'enregistrement de l'orchestration ; None =
                          config active de l'écran Améliorations.
+    `research_every`   : si > 0, lance ResearchRunner.run() (laboratoire) toutes
+                         les N attaques.
+    `research_config`  : instantané de la config de recherche (dict) figé au
+                         moment de l'enregistrement ; None = config active. La
+                         config doit définir une macro d'ouverture du labo
+                         (open_lab_macro) pour être utilisable en rituel.
     """
     log: LogCallback = log_callback or print
     cfg = load_attack_config()
@@ -128,7 +136,7 @@ def run_attack_session(
     delays = cfg["delays"]
 
     neutral = actions.get("neutral_click")
-    counters = {"walls": 0, "upgrades": 0}
+    counters = {"walls": 0, "upgrades": 0, "research": 0}
 
     def _after_attack() -> None:
         """Rejoue la macro « après chaque attaque » si elle est configurée."""
@@ -171,6 +179,20 @@ def run_attack_session(
                                    config_data=upgrades_config).run()
                 except Exception as e:
                     log(f"Erreur rituel améliorations : {e}")
+        if research_every > 0:
+            counters["research"] += 1
+            if counters["research"] >= research_every:
+                counters["research"] = 0
+                log(f"--- Rituel recherche (laboratoire) "
+                    f"(toutes les {research_every} attaques) ---")
+                _isleep(delays.get("before_walls_ritual", 1.5))
+                try:
+                    from .research import ResearchRunner  # import paresseux
+                    ResearchRunner(log_callback=walls_log_callback or log,
+                                   stop_event=stop_event,
+                                   config_data=research_config).run()
+                except Exception as e:
+                    log(f"Erreur rituel recherche : {e}")
 
     for acc in accounts:
         if _stop():
