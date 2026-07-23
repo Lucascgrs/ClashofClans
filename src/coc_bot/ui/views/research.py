@@ -36,6 +36,7 @@ class ResearchView(BaseView):
 
         self.v_elexir = tk.BooleanVar(value=bool(p.get("use_elexir", True)))
         self.v_noir   = tk.BooleanVar(value=bool(p.get("use_elexir_noir", True)))
+        self.v_keep   = tk.IntVar(value=max(0, int(p.get("keep_workers_free", 0))))
         self.v_max    = tk.IntVar(value=int(p.get("max_upgrades", 1)))
         self.v_scrolls = tk.IntVar(value=int(p.get("max_scrolls", 8)))
         self.v_scamt  = tk.IntVar(value=int(p.get("scroll_amount", -210)))
@@ -55,6 +56,7 @@ class ResearchView(BaseView):
         grid = ctk.CTkFrame(params.body, fg_color="transparent")
         grid.grid(row=0, column=0, sticky="ew")
         for i, (label, var) in enumerate([
+            ("À laisser libres (min.)", self.v_keep),
             ("Recherches max / session", self.v_max),
             ("Scrolls max", self.v_scrolls),
             ("Scroll amount", self.v_scamt),
@@ -161,6 +163,7 @@ class ResearchView(BaseView):
             "use_or": False,
             "use_elexir": bool(self.v_elexir.get()),
             "use_elexir_noir": bool(self.v_noir.get()),
+            "keep_workers_free": max(0, int(self.v_keep.get())),
             "max_upgrades": max(1, int(self.v_max.get())),
             "max_scrolls": max(0, int(self.v_scrolls.get())),
             "scroll_amount": int(self.v_scamt.get()),
@@ -175,6 +178,7 @@ class ResearchView(BaseView):
         p = cfg.get("params", {})
         self.v_elexir.set(bool(p.get("use_elexir", True)))
         self.v_noir.set(bool(p.get("use_elexir_noir", True)))
+        self.v_keep.set(max(0, int(p.get("keep_workers_free", 0))))
         self.v_max.set(int(p.get("max_upgrades", 1)))
         self.v_scrolls.set(int(p.get("max_scrolls", 8)))
         self.v_scamt.set(int(p.get("scroll_amount", -210)))
@@ -280,6 +284,12 @@ class ResearchView(BaseView):
 
         def task():
             try:
+                # Petit délai pour laisser le temps de basculer sur le jeu avant
+                # le premier clic (bouton « i »). Interrompu par STOP.
+                self._log("Bascule vers le jeu… démarrage dans 3 s (STOP pour annuler).")
+                if self.stop_event.wait(3.0):
+                    self._log("Démarrage annulé.")
+                    return
                 runner = research.ResearchRunner(log_callback=self._log,
                                                  stop_event=self.stop_event)
                 self._log("=== Lancement Auto-Recherches ===")

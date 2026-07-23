@@ -40,6 +40,9 @@ RESEARCH_DEFAULT_CONFIG = {
     "zones": {
         # Liste scrollable des recherches (laboratoire).
         "liste_recherches": {"x1": 700, "y1": 180, "x2": 1263, "y2": 800},
+        # Compteur « X/Y » (comme les ouvriers) des recherches libres. {0,0,0,0}
+        # = non configuré → aucun garde-fou (on lance sans lire le compteur).
+        "ouvriers": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
     },
     "buttons": {
         # Petit « i » d'information qui OUVRE la liste des recherches (comme le
@@ -53,6 +56,7 @@ RESEARCH_DEFAULT_CONFIG = {
         "use_or":            False,  # le laboratoire n'utilise pas l'or
         "use_elexir":        True,
         "use_elexir_noir":   True,
+        "keep_workers_free": 0,      # X/Y : nb à laisser libres au minimum
         "max_upgrades":      1,      # une recherche à la fois (labo)
         "max_scrolls":       8,
         "scroll_amount":     -210,
@@ -84,6 +88,12 @@ RESEARCH_CONFIG_STEPS = [
      "Ouvrez la liste des recherches (via le « i ») puis délimitez les 2 coins "
      "(haut-gauche et bas-droit) du rectangle contenant la liste. Le programme "
      "scrollera la molette à l'intérieur de cette zone."),
+    ("zones.ouvriers", "zone",
+     "Zone COMPTEUR « X/Y » (comme les ouvriers)",
+     "Délimitez le rectangle autour du compteur « X/Y » des recherches libres "
+     "(ex. « 1/1 »), l'équivalent des ouvriers. Sert au garde-fou « à laisser "
+     "libres (min.) ». Si vous n'en avez pas, refaites le rectangle à taille "
+     "NULLE (2 coins au même point) pour désactiver le garde-fou."),
     ("params.price_split_x", "vline",
      "Séparateur NOM / PRIX (barre verticale)",
      "Toujours dans la liste des recherches : placez la souris sur la frontière "
@@ -180,6 +190,10 @@ class ResearchRunner(UpgradesRunner):
         # Cible la liste des RECHERCHES pour la lecture héritée (self.cfg est la
         # config remparts, réutilisée pour l'OCR de liste / scroll / séparateur).
         self.cfg["zones"]["liste_ameliorations"] = dict(self.ucfg["zones"]["liste_recherches"])
+        # Compteur « X/Y » propre à la recherche → read_workers() lira CETTE zone
+        # (et non celle des ouvriers de remparts).
+        self.cfg["zones"]["ouvriers"] = dict(self.ucfg["zones"].get(
+            "ouvriers") or {"x1": 0, "y1": 0, "x2": 0, "y2": 0})
         for k in _INJECT_PARAMS:
             if k in p:
                 self.cfg["params"][k] = p[k]
@@ -215,19 +229,31 @@ class ResearchRunner(UpgradesRunner):
     # ---------- entrée publique ----------
 
     def run(self) -> bool:
-        """Lance la première recherche réalisable de la liste. Le laboratoire ne
-        menant qu'une recherche à la fois, `max_upgrades` vaut 1 par défaut."""
+        """Lance la/les recherche(s) réalisable(s) de la liste. Respecte le
+        garde-fou « à laisser libres (min.) » si la zone compteur X/Y est
+        configurée. Le laboratoire ne menant qu'une recherche à la fois,
+        `max_upgrades` vaut 1 par défaut."""
         try:
             if not self._split_x():
                 self.log("⚠ Séparateur NOM/PRIX de la liste des recherches non "
                          "configuré (assistant Recherches). Abandon.")
                 return False
+            keep = max(0, int(self.ucfg["params"].get("keep_workers_free", 0)))
+            z = self.cfg["zones"].get("ouvriers") or {}
+            has_counter = int(z.get("x2", 0)) > int(z.get("x1", 0))
             max_r = max(1, int(self.ucfg["params"].get("max_upgrades", 1)))
             done = 0
             for _ in range(max_r):
                 if self._stop_requested():
                     break
-                if not self._upgrade_first_possible({}):
+                self._open_workers_menu()  # ouvre la liste via le « i »
+                if has_counter:
+                    free, total = self.read_workers()
+                    self.log(f"Recherches libres (X/Y) : {free}/{total}")
+                    if free - keep < 1:
+                        self.log(f"Insuffisant (libres={free}, à préserver={keep}).")
+                        break
+                if not self._select_first_possible({}):
                     self.log("Aucune recherche réalisable dans la liste.")
                     break
                 done += 1

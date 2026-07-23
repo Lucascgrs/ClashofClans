@@ -321,10 +321,16 @@ class UpgradesRunner(WallsUpgrader):
     def _upgrade_first_possible(self, resources: dict) -> bool:
         """Ouvre la liste et lance la première amélioration réalisable.
         Scrolle si rien n'est réalisable à l'écran. Retourne True si lancée."""
+        self._open_workers_menu()
+        return self._select_first_possible(resources)
+
+    def _select_first_possible(self, resources: dict) -> bool:
+        """Sélectionne/lance la première amélioration réalisable dans la liste
+        DÉJÀ OUVERTE (scrolle au besoin). Séparé de l'ouverture pour permettre
+        de lire un compteur (ex. ouvriers) entre l'ouverture et la sélection."""
         keyword = self.cfg["params"].get("keyword", "rempart").lower()
         max_scrolls = int(self.cfg["params"].get("max_scrolls", 8))
 
-        self._open_workers_menu()
         for s in range(max_scrolls + 1):
             if self._stop_requested():
                 return False
