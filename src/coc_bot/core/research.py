@@ -57,6 +57,12 @@ RESEARCH_DEFAULT_CONFIG = {
         "use_elexir":        True,
         "use_elexir_noir":   True,
         "keep_workers_free": 0,      # X/Y : nb à laisser libres au minimum
+        # Règle « événement » : un 2ᵉ laborantin (payant en gemmes) peut apparaître
+        # lors d'un événement. Si activée et que le TOTAL de laborantins atteint
+        # reserve_event_total (ex. 2), on garde reserve_event_keep libre(s) (ex. 1).
+        "reserve_event_enabled": False,
+        "reserve_event_total":   2,  # total (Y de « X/Y ») déclenchant la règle
+        "reserve_event_keep":    1,  # laborantins à garder libres dans ce cas
         "max_upgrades":      1,      # une recherche à la fois (labo)
         "max_scrolls":       8,
         "scroll_amount":     -210,
@@ -241,7 +247,6 @@ class ResearchRunner(UpgradesRunner):
                 self.log("⚠ Séparateur NOM/PRIX de la liste des recherches non "
                          "configuré (assistant Recherches). Abandon.")
                 return False
-            keep = max(0, int(self.ucfg["params"].get("keep_workers_free", 0)))
             z = self.cfg["zones"].get("ouvriers") or {}
             has_counter = int(z.get("x2", 0)) > int(z.get("x1", 0))
             max_r = max(1, int(self.ucfg["params"].get("max_upgrades", 1)))
@@ -252,7 +257,11 @@ class ResearchRunner(UpgradesRunner):
                 self._open_workers_menu()  # ouvre la liste via le « i »
                 if has_counter:
                     free, total = self.read_workers()
-                    self.log(f"Recherches libres (X/Y) : {free}/{total}")
+                    # Réserve « événement » calculée à partir du total lu (ex. 2ᵉ
+                    # laborantin gemme). Sans compteur configuré, pas de garde-fou.
+                    keep = self._effective_keep(self.ucfg["params"], total)
+                    self.log(f"Recherches libres (X/Y) : {free}/{total} "
+                             f"(à préserver={keep})")
                     if free - keep < 1:
                         self.log(f"Insuffisant (libres={free}, à préserver={keep}).")
                         break

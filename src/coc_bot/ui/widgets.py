@@ -380,8 +380,9 @@ class ConfigWizard(Dialog):
     """Assistant de capture (points, zones, barres verticales).
 
     ``steps`` : liste de tuples ``(clé_dottée, type, titre, description)`` avec
-    ``type`` ∈ {'point', 'zone', 'vline'}. À la fin, ``on_save(cfg)`` est appelé.
-    Repris à l'identique (comportement) de l'ancienne interface Tkinter.
+    ``type`` ∈ {'point', 'zone', 'vline', 'triangle'}. À la fin, ``on_save(cfg)``
+    est appelé. ``triangle`` capture 3 sommets successifs et les stocke en liste
+    ``[[x, y], [x, y], [x, y]]`` sous la clé dottée.
     """
 
     def __init__(self, master, *, title: str, cfg: dict, steps: list,
@@ -437,6 +438,9 @@ class ConfigWizard(Dialog):
                                          else "➤ Coin BAS-DROIT"))
         elif typ == "vline":
             self.lbl_sub.configure(text="➤ Barre verticale (seule la position X compte)")
+        elif typ == "triangle":
+            self.lbl_sub.configure(
+                text=f"➤ Sommet {self._state['sub_idx'] + 1} / 3 du triangle")
         else:
             self.lbl_sub.configure(text="➤ Position du bouton")
         self.lbl_progress.configure(
@@ -469,6 +473,18 @@ class ConfigWizard(Dialog):
             self.log(f"[{step_title}] barre verticale → X = {x}")
             self._state["step_idx"] += 1
             self._state["sub_idx"] = 0
+        elif typ == "triangle":
+            pts = self._state.get("triangle_pts") or []
+            pts.append([x, y])
+            self._state["triangle_pts"] = pts
+            self.log(f"[{step_title}] sommet {len(pts)}/3 → ({x}, {y})")
+            if len(pts) >= 3:
+                self._set_nested(self.cfg, key, pts)
+                self._state["triangle_pts"] = None
+                self._state["step_idx"] += 1
+                self._state["sub_idx"] = 0
+            else:
+                self._state["sub_idx"] = len(pts)
         else:  # zone
             if self._state["sub_idx"] == 0:
                 self._state["current_zone_tl"] = (x, y)

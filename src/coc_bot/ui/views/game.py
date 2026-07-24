@@ -122,30 +122,21 @@ class GameView(BaseView):
             ctk.CTkLabel(counts, text=label).grid(row=0, column=i * 2, padx=(0 if i == 0 else theme.PAD, 4))
             ctk.CTkEntry(counts, textvariable=var, width=70).grid(row=0, column=i * 2 + 1)
 
-        # Rituels : remparts OU améliorations (exclusifs) ; recherche cumulable.
-        self.v_walls_enabled = tk.BooleanVar(value=False)
-        self.v_walls_every = tk.IntVar(value=5)
+        # Rituels : améliorations (bâtiments/remparts selon la config) + recherche.
         self.v_upg_enabled = tk.BooleanVar(value=False)
         self.v_upg_every = tk.IntVar(value=5)
         self.v_research_enabled = tk.BooleanVar(value=False)
         self.v_research_every = tk.IntVar(value=5)
         self.v_research_cfg = tk.StringVar(value=RESEARCH_ACTIVE_LABEL)
 
-        w = ctk.CTkFrame(atk.body, fg_color="transparent")
-        w.grid(row=5, column=0, sticky="ew")
-        ctk.CTkCheckBox(w, text="Améliorer les remparts toutes les",
-                        variable=self.v_walls_enabled, command=self._on_walls_toggle
-                        ).pack(side="left")
-        ctk.CTkEntry(w, textvariable=self.v_walls_every, width=56).pack(side="left", padx=6)
-        ctk.CTkLabel(w, text="attaques").pack(side="left")
-
         u = ctk.CTkFrame(atk.body, fg_color="transparent")
-        u.grid(row=6, column=0, sticky="ew", pady=(4, 0))
-        ctk.CTkCheckBox(u, text="Améliorer les 1ers choix toutes les",
-                        variable=self.v_upg_enabled, command=self._on_upg_toggle
+        u.grid(row=5, column=0, sticky="ew")
+        ctk.CTkCheckBox(u, text="Améliorer (bâtiments/remparts) toutes les",
+                        variable=self.v_upg_enabled
                         ).pack(side="left")
         ctk.CTkEntry(u, textvariable=self.v_upg_every, width=56).pack(side="left", padx=6)
-        ctk.CTkLabel(u, text="attaques (config : écran Améliorations)").pack(side="left")
+        ctk.CTkLabel(u, text="attaques (config : écran Améliorations — cases bâtiments/remparts)"
+                     ).pack(side="left")
 
         rs = ctk.CTkFrame(atk.body, fg_color="transparent")
         rs.grid(row=7, column=0, sticky="ew", pady=(4, 0))
@@ -339,29 +330,19 @@ class GameView(BaseView):
                       border_width=1, text_color=("gray20", "gray85")).pack(side="right", padx=8)
 
     # =====================================================================
-    # Rituels exclusifs
+    # Rituels
     # =====================================================================
-    def _on_walls_toggle(self):
-        # Remparts et améliorations restent EXCLUSIFS entre eux ; la recherche
-        # est cumulable (indépendante), on n'y touche pas.
-        if self.v_walls_enabled.get():
-            self.v_upg_enabled.set(False)
-
-    def _on_upg_toggle(self):
-        if self.v_upg_enabled.get():
-            self.v_walls_enabled.set(False)
-
     def _on_research_toggle(self):
-        # Recherche cumulable : indépendante des remparts / améliorations.
+        # Recherche cumulable : indépendante des améliorations.
         pass
 
     def _research_cfg_values(self):
         return [RESEARCH_ACTIVE_LABEL] + research.list_named_configs()
 
     def _rituals(self):
-        walls_every = int(self.v_walls_every.get()) if self.v_walls_enabled.get() else 0
-        upg_every = int(self.v_upg_every.get()) if self.v_upg_enabled.get() else 0
-        return walls_every, upg_every
+        """Fréquence du rituel d'améliorations (0 = désactivé). Les remparts sont
+        désormais gérés DANS la config d'améliorations (case « Remparts »)."""
+        return int(self.v_upg_every.get()) if self.v_upg_enabled.get() else 0
 
     def _research_snapshot(self):
         """(research_every, config_dict) pour le rituel recherche, ou (0, None).
@@ -398,15 +379,13 @@ class GameView(BaseView):
             return
         nb_atk, nb_night = self.v_nb_atk.get(), self.v_nb_night.get()
         strat_night = self.v_strat_night.get()
-        walls_every, upg_every = self._rituals()
+        upg_every = self._rituals()
         research_every, research_cfg = self._research_snapshot()
         after_atk = self._after_attack_file()
         stop_event = threading.Event()
 
         def task():
             self.app.log("Démarrage de la session d'attaques…")
-            if walls_every > 0:
-                self.app.log(f"Rituel remparts activé : toutes les {walls_every} attaques.")
             if upg_every > 0:
                 self.app.log(f"Rituel améliorations activé : toutes les {upg_every} attaques.")
             if research_every > 0:
@@ -417,7 +396,7 @@ class GameView(BaseView):
                 attack_session.run_attack_session(
                     accounts, attaques=nb_atk, attaques_night=nb_night,
                     strategy_file=strat, night_strategy_file=strat_night,
-                    walls_every=walls_every, upgrades_every=upg_every,
+                    upgrades_every=upg_every,
                     research_every=research_every, research_config=research_cfg,
                     after_attack_file=after_atk or None,
                     log_callback=self.app.log, walls_log_callback=self.app.log,
@@ -436,7 +415,7 @@ class GameView(BaseView):
         if not strat:
             messagebox.showwarning("Attention", "Veuillez choisir une stratégie principale.")
             return
-        walls_every, upg_every = self._rituals()
+        upg_every = self._rituals()
         research_every, research_cfg = self._research_snapshot()
         cfg = {
             "type": orchestration.TASK_ATTACK, "name": "",
@@ -444,13 +423,14 @@ class GameView(BaseView):
             "attaques": self.v_nb_atk.get(),
             "attaques_night": self.v_nb_night.get(), "strategy_file": strat,
             "night_strategy_file": self.v_strat_night.get(),
-            "walls_every": walls_every, "upgrades_every": upg_every,
+            "upgrades_every": upg_every,
             "research_every": research_every,
             "after_attack_file": self._after_attack_file(),
         }
-        # Instantané de la config d'améliorations (dont la liste d'exclusion)
-        # figé au moment de l'enregistrement : l'orchestration réutilisera
-        # EXACTEMENT ces paramètres, même si l'écran Améliorations change ensuite.
+        # Instantané AUTO-SUFFISANT de la config d'améliorations (toutes les
+        # coordonnées + cases bâtiments/remparts + liste d'exclusion) figé au
+        # moment de l'enregistrement : l'orchestration réutilisera EXACTEMENT ces
+        # paramètres, même si l'écran Améliorations change ensuite.
         if upg_every > 0:
             cfg["upgrades_config"] = upgrades.load_upgrades_config()
         # De même pour la recherche : on fige la config choisie (fichier nommé

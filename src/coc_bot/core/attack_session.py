@@ -111,12 +111,13 @@ def run_attack_session(
 ) -> None:
     """Lance la session d'attaques sur les comptes fournis.
 
-    `walls_every`      : si > 0, lance WallsUpgrader.run() toutes les N attaques
-                         (jour + nuit confondues).
-    `upgrades_every`   : si > 0, lance UpgradesRunner.run() (premiers choix de la
-                         liste d'améliorations) toutes les N attaques. Exclusif
-                         de `walls_every` côté GUI, mais les deux compteurs sont
-                         indépendants ici.
+    `walls_every`      : LEGACY (anciennes configs d'orchestration). Si > 0, lance
+                         WallsUpgrader.run() toutes les N attaques. Le nouveau GUI
+                         n'émet plus ce champ : les remparts sont gérés par le
+                         rituel « améliorations » (case « Remparts » de sa config).
+    `upgrades_every`   : si > 0, lance UpgradesRunner.run() toutes les N attaques —
+                         améliore bâtiments ET/OU remparts selon les cases de la
+                         config d'améliorations (auto-suffisante).
     `after_attack_file`: si défini, macro rejouée APRÈS chaque attaque (jour et
                          nuit) — utile pour sortir d'une situation, ouvrir des
                          coffres de récompense, etc.

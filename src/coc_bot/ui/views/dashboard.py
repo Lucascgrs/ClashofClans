@@ -52,7 +52,7 @@ class DashboardView(BaseView):
         shortcuts = [
             ("🔎  Scanner & inviter", "scan"),
             ("🎮  Lancer une session d'attaque", "game"),
-            ("🧱  Améliorer les remparts", "walls"),
+            ("⬆  Améliorations (bâtiments/remparts)", "upgrades"),
             ("👥  Multi-comptes", "multi"),
             ("🗂  Orchestration", "orchestration"),
             ("📊  Voir les données", "data"),

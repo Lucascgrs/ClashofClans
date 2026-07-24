@@ -504,8 +504,9 @@ class WallsUpgrader:
 
     def _save_rows_debug(self, rows, img_rgb, offset, highlight=None) -> None:
         """Sauvegarde l'image couleur de la liste, annotée : barre verticale,
-        bandes de lignes et étiquette symbole/prix."""
-        if img_rgb is None:
+        bandes de lignes et étiquette symbole/prix. N'enregistre RIEN si le
+        Debug OCR n'est pas coché."""
+        if not self.debug_ocr or img_rgb is None:
             return
         try:
             debug_dir = DEBUG_OCR_DIR
@@ -542,8 +543,9 @@ class WallsUpgrader:
         """Sauvegarde une capture COULEUR annotée d'une zone-bouton lue par OCR :
         toutes les détections (boîtes vertes + texte), la CIBLE retenue en rouge
         (index `target_idx`) et le POINT DE CLIC (croix bleue). Sert à voir où
-        l'OCR situe un bouton (ex. « Améliorer ») et où le clic va tomber."""
-        if img_rgb is None:
+        l'OCR situe un bouton (ex. « Améliorer ») et où le clic va tomber.
+        N'enregistre RIEN si le Debug OCR n'est pas coché."""
+        if not self.debug_ocr or img_rgb is None:
             return
         try:
             os.makedirs(DEBUG_OCR_DIR, exist_ok=True)
@@ -599,6 +601,28 @@ class WallsUpgrader:
         self.log(f"Ouvriers : {free}/{total}  |  Or : {gold}  |  Elexir : {elexir}")
         return {"workers_free": free, "workers_total": total,
                 "gold": gold, "elexir": elexir}
+
+    @staticmethod
+    def _effective_keep(params: dict, total: int) -> int:
+        """Nombre d'ouvriers (ou de laborantins) à laisser libres au minimum,
+        en tenant compte de la règle « événement ».
+
+        Base = ``keep_workers_free``. Clash of Clans propose parfois, lors
+        d'événements, un ouvrier/laborantin SUPPLÉMENTAIRE dont l'usage coûte
+        des gemmes : on le repère au fait que le TOTAL lu (le « Y » de « X/Y »)
+        atteint le seuil configuré (``reserve_event_total`` — ex. 7 ouvriers,
+        2 laborantins). Dans ce cas on garde au minimum ``reserve_event_keep``
+        libre(s) (ex. 1) pour ne jamais consommer cet ouvrier « gemme ».
+        Hors événement (total < seuil), on applique simplement la base.
+
+        Le ``max`` garantit qu'on ne réduit jamais la réserve de base : la règle
+        ne peut qu'AJOUTER de la marge, jamais en retirer."""
+        keep = max(0, int(params.get("keep_workers_free", 0)))
+        if params.get("reserve_event_enabled", False):
+            threshold = int(params.get("reserve_event_total", 0) or 0)
+            if threshold > 0 and int(total) >= threshold:
+                keep = max(keep, int(params.get("reserve_event_keep", 1) or 0))
+        return keep
 
     # ---------- clics ----------
 
@@ -671,8 +695,9 @@ class WallsUpgrader:
 
     def _save_debug_image(self, img, line, offset, prix) -> None:
         """Sauvegarde l'image binarisée vue par l'OCR, avec un rectangle
-        autour de la ligne correspondant au mot-clé."""
-        if img is None:
+        autour de la ligne correspondant au mot-clé. N'enregistre RIEN si le
+        Debug OCR n'est pas coché."""
+        if not self.debug_ocr or img is None:
             return
         try:
             debug_dir = DEBUG_OCR_DIR

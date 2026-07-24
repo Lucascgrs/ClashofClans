@@ -243,8 +243,8 @@ class MultiView(BaseView):
         label(4, "Nb attaques :")
         ctk.CTkEntry(wrap, textvariable=v_nb, width=80).grid(row=4, column=1, sticky="w", pady=6)
 
-        # --- Rituel principal : remparts OU améliorations (exclusifs) --
-        rit = Card(wrap, title="Rituel principal toutes les X attaques (remparts OU améliorations)")
+        # --- Rituel principal : améliorations (bâtiments et/ou remparts) --
+        rit = Card(wrap, title="Rituel principal toutes les X attaques (améliorations : bâtiments/remparts)")
         rit.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
         rrow = ctk.CTkFrame(rit.body, fg_color="transparent")
         rrow.grid(row=0, column=0, sticky="w")

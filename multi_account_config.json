@@ -9,7 +9,11 @@
             "nb_attacks": 2,
             "ritual": "upgrades",
             "ritual_every": 1,
-            "upgrades_config": "améliorer_tout_10_1ouvrierrestant_saufhdv.json"
+            "upgrades_config": "",
+            "research_enabled": false,
+            "research_every": 5,
+            "research_config": "",
+            "after_attack_file": ""
         }
     ]
 }

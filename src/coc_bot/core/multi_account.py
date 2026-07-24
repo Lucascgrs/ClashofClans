@@ -8,18 +8,19 @@ Chaque compte est décrit par une entrée :
         "army_file":       "armee/selectfirstarmy.json", # macro de sélection d'armée ("" = aucune)
         "attack_file":     "attaque/attaquehdv13.json",  # macro d'attaque
         "nb_attacks":      10,                           # attaques avec ce compte
-        "ritual":          "none",                       # rituel PRINCIPAL : "none" | "walls" | "upgrades"
+        "ritual":          "none",                       # rituel PRINCIPAL : "none" | "upgrades" (bâtiments/remparts)
         "ritual_every":    5,                            # rituel principal toutes les N attaques
-        "upgrades_config": "",                           # config nommée (si ritual = "upgrades")
+        "upgrades_config": "",                           # config nommée d'améliorations (si ritual = "upgrades")
         "research_enabled": False,                       # recherche CUMULABLE avec le rituel principal
         "research_every":  5,                            # recherche toutes les N attaques (fréquence propre)
         "research_config": "",                           # config nommée de recherche
         "after_attack_file": ""                          # macro rejouée après CHAQUE attaque ("" = aucune)
     }
 
-La recherche est CUMULABLE avec le rituel principal (remparts OU améliorations) :
-chacun a sa propre fréquence « toutes les X attaques » ; s'ils tombent sur la
-même attaque, on exécute le rituel principal PUIS la recherche.
+Le rituel principal « améliorations » gère bâtiments ET/OU remparts selon les
+cases de sa config (fusion des anciens rituels remparts/améliorations). La
+recherche est CUMULABLE : chacun a sa propre fréquence « toutes les X attaques » ;
+s'ils tombent sur la même attaque, on exécute le rituel principal PUIS la recherche.
 
 La configuration générale {"loop": bool, "entries": [...]} s'enregistre /
 se charge en JSON dans Configs/MultiCompte/. Les délais entre macros sont
@@ -34,7 +35,6 @@ import time
 from typing import Callable, Optional
 
 from . import attack_session
-from .walls import WallsUpgrader
 from .upgrades import UpgradesRunner
 from ..paths import MULTI_CONFIG_DIR as _MULTI_CONFIG_DIR, MULTI_LAST_FILE
 
@@ -56,12 +56,11 @@ DEFAULT_ENTRY = {
     "after_attack_file": "",
 }
 
-# Rituel PRINCIPAL : remparts OU améliorations (exclusifs). La recherche est
-# gérée séparément (cumulable, fréquence propre). RITUAL_LABELS conserve aussi
-# le libellé « research » pour les journaux.
+# Rituel PRINCIPAL : améliorations (bâtiments et/ou remparts, selon la config).
+# La recherche est gérée séparément (cumulable, fréquence propre). RITUAL_LABELS
+# conserve aussi le libellé « research » pour les journaux.
 MAIN_RITUAL_LABELS = {
     "none":     "Aucun",
-    "walls":    "Remparts",
     "upgrades": "Améliorations",
 }
 RITUAL_LABELS = {**MAIN_RITUAL_LABELS, "research": "Recherche"}
@@ -78,6 +77,10 @@ def normalize_entry(entry: dict) -> dict:
         if not out.get("research_every"):
             out["research_every"] = out.get("ritual_every", 5)
         out["ritual"] = "none"
+    # Migration : ancien rituel « remparts » → « améliorations » (fusionnés). La
+    # case « Remparts » se règle désormais dans la config d'améliorations choisie.
+    if out.get("ritual") == "walls":
+        out["ritual"] = "upgrades"
     if out.get("ritual") not in MAIN_RITUAL_LABELS:
         out["ritual"] = "none"
     out["research_enabled"] = bool(out.get("research_enabled"))
@@ -136,9 +139,7 @@ def run_multi_session(
         log(f"--- Rituel {RITUAL_LABELS.get(kind, kind)} ---")
         _isleep(delays.get("before_walls_ritual", 1.5))
         try:
-            if kind == "walls":
-                WallsUpgrader(log_callback=log, stop_event=stop_event).run()
-            elif kind == "upgrades":
+            if kind == "upgrades":
                 UpgradesRunner(log_callback=log, stop_event=stop_event,
                                config_file=entry.get("upgrades_config") or None).run()
             elif kind == "research":

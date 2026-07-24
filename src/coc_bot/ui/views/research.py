@@ -41,6 +41,9 @@ class ResearchView(BaseView):
         self.v_scrolls = tk.IntVar(value=int(p.get("max_scrolls", 8)))
         self.v_scamt  = tk.IntVar(value=int(p.get("scroll_amount", -210)))
         self.v_debug  = tk.BooleanVar(value=bool(p.get("debug_ocr", False)))
+        self.v_res_event = tk.BooleanVar(value=bool(p.get("reserve_event_enabled", False)))
+        self.v_res_total = tk.IntVar(value=int(p.get("reserve_event_total", 2)))
+        self.v_res_keep  = tk.IntVar(value=int(p.get("reserve_event_keep", 1)))
 
         # --- Ressources autorisées -------------------------------------
         types = Card(body, title="Ressources autorisées")
@@ -68,13 +71,25 @@ class ResearchView(BaseView):
             ctk.CTkLabel(cell, text=label, font=theme.font_small(),
                          text_color=theme.MUTED, anchor="w").pack(fill="x")
             ctk.CTkEntry(cell, textvariable=var).pack(fill="x")
+        # Règle « événement » : garder un laborantin de plus quand l'événement
+        # CoC ajoute un 2ᵉ laborantin « gemme » (repéré par le total qui monte).
+        ev = ctk.CTkFrame(params.body, fg_color="transparent")
+        ev.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+        ctk.CTkCheckBox(ev, variable=self.v_res_event,
+                        text="🎁 Événement — si le total atteint").pack(side="left")
+        ctk.CTkEntry(ev, textvariable=self.v_res_total, width=52).pack(side="left", padx=6)
+        ctk.CTkLabel(ev, text="laborantins, en garder").pack(side="left")
+        ctk.CTkEntry(ev, textvariable=self.v_res_keep, width=52).pack(side="left", padx=6)
+        ctk.CTkLabel(ev, text="libre(s)").pack(side="left")
         hint_label(
             params.body,
             "La liste s'ouvre via le bouton « i » configuré (assistant). Choisit la\n"
             "PREMIÈRE recherche lisible, payable (prix blanc) et non en cours, dont\n"
             "la ressource est cochée, puis : clic ligne → « Confirmer » (pas de\n"
-            "bouton « Améliorer »). Le labo ne mène qu'une recherche à la fois."
-        ).grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
+            "bouton « Améliorer »). Le labo ne mène qu'une recherche à la fois.\n"
+            "« Événement » : le 2ᵉ laborantin d'événement coûte des gemmes — la\n"
+            "zone compteur « X/Y » doit être configurée (assistant) pour l'appliquer."
+        ).grid(row=2, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
         # --- Exclusions ------------------------------------------------
         excl = Card(body, title="Recherches à exclure",
@@ -168,6 +183,9 @@ class ResearchView(BaseView):
             "max_scrolls": max(0, int(self.v_scrolls.get())),
             "scroll_amount": int(self.v_scamt.get()),
             "debug_ocr": bool(self.v_debug.get()),
+            "reserve_event_enabled": bool(self.v_res_event.get()),
+            "reserve_event_total": max(0, int(self.v_res_total.get())),
+            "reserve_event_keep": max(0, int(self.v_res_keep.get())),
             "exclude_list": [ln.strip() for ln
                              in self.txt_exclude.get("1.0", "end-1c").splitlines()
                              if ln.strip()],
@@ -183,6 +201,9 @@ class ResearchView(BaseView):
         self.v_scrolls.set(int(p.get("max_scrolls", 8)))
         self.v_scamt.set(int(p.get("scroll_amount", -210)))
         self.v_debug.set(bool(p.get("debug_ocr", False)))
+        self.v_res_event.set(bool(p.get("reserve_event_enabled", False)))
+        self.v_res_total.set(int(p.get("reserve_event_total", 2)))
+        self.v_res_keep.set(int(p.get("reserve_event_keep", 1)))
         self.txt_exclude.delete("1.0", "end")
         self.txt_exclude.insert("1.0", "\n".join(p.get("exclude_list", []) or []))
 

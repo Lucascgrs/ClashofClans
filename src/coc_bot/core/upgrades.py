@@ -8,16 +8,20 @@ réalisable en partant du haut :
   - le type de ressource est détecté par la couleur du symbole
     (or = jaune, elexir = rose/violet, elexir noir = sombre) ;
   - chaque type peut être activé/désactivé (use_or / use_elexir / use_elexir_noir) ;
-  - les remparts sont inclus ou non (include_remparts) — s'ils le sont, ils
-    passent par le processus remparts existant (améliorer plus × N, valider) ;
+  - DEUX cases indépendantes décident ce qu'on améliore : « upgrade_buildings »
+    (bâtiments) et « upgrade_walls » (remparts). On peut cocher l'une, l'autre ou
+    les deux. Un rempart rencontré passe par le processus remparts existant
+    (« améliorer plus » × N, valider) ; un bâtiment par le processus bâtiment ;
   - un nombre d'ouvriers à laisser libres est configurable (keep_workers_free).
 
 Processus pour un bâtiment (≠ rempart) :
     clic sur la ligne → clic 'Améliorer' → clic 'Confirmer' → clic neutre.
 
-Les zones/boutons partagés (ouvriers, or, elexir, liste, info ouvriers,
-clic neutre, boutons remparts) viennent de walls_config.json ; ce module
-n'ajoute que ce qui lui est propre dans upgrades_config.json.
+La config est AUTO-SUFFISANTE : elle contient TOUTES les coordonnées (zones de
+liste — qui varient selon l'HDV —, séparateur, ouvriers/or/élixir, boutons
+remparts, clic neutre, élixir noir, zone « Améliorer », « Confirmer ») et tous
+les paramètres. Chaque configuration nommée est donc indépendante ; walls_config.json
+ne sert plus que de repli de migration pour les anciennes configs sans coordonnées.
 """
 
 from __future__ import annotations
@@ -27,7 +31,8 @@ import os
 import re
 import unicodedata
 
-from .walls import WallsUpgrader
+from .walls import (WallsUpgrader, WALLS_DEFAULT_CONFIG, WALLS_CONFIG_STEPS,
+                    load_walls_config)
 from ..paths import UPGRADES_CONFIG_FILE, UPGRADES_CONFIG_DIR as _UPGRADES_CONFIG_DIR
 
 
@@ -44,36 +49,53 @@ def normalize_upgrade_name(s: str) -> str:
 UPGRADES_CONFIG_DIR = str(_UPGRADES_CONFIG_DIR)
 
 
-UPGRADES_DEFAULT_CONFIG = {
-    "zones": {
-        "elexir_noir": {"x1": 1515, "y1": 246, "x2": 1815, "y2": 287},
-        # ZONE (et non un point fixe) du bouton « Améliorer » : sa position
-        # DIFFÈRE selon le bâtiment → on la lit en OCR pour cliquer là où le
-        # mot « Améliorer » est réellement détecté.
-        "ameliorer":   {"x1": 800, "y1": 850, "x2": 1120, "y2": 960},
-    },
-    "buttons": {
-        "confirmer": {"x": 1150, "y": 700},
-    },
-    "params": {
+def _deep_copy(d):
+    return json.loads(json.dumps(d))
+
+
+def _build_default_config() -> dict:
+    """Config par défaut AUTO-SUFFISANTE : superset de la config remparts (toutes
+    les zones/boutons/délais/seuils de base) + les éléments propres aux
+    améliorations. Une config enregistrée contient ainsi TOUTES ses coordonnées
+    (les zones de liste varient selon l'HDV) et ne dépend plus d'un fichier de
+    coordonnées partagé."""
+    cfg = _deep_copy(WALLS_DEFAULT_CONFIG)
+    cfg["zones"]["elexir_noir"] = {"x1": 1515, "y1": 246, "x2": 1815, "y2": 287}
+    # ZONE (et non un point fixe) du bouton « Améliorer » : sa position DIFFÈRE
+    # selon le bâtiment → lue en OCR pour cliquer où le mot est détecté.
+    cfg["zones"]["ameliorer"] = {"x1": 800, "y1": 850, "x2": 1120, "y2": 960}
+    cfg["buttons"]["confirmer"] = {"x": 1150, "y": 700}
+    cfg["params"].update({
         "use_or":            True,
         "use_elexir":        True,
         "use_elexir_noir":   True,
-        "include_remparts":  False,
+        # DEUX cases INDÉPENDANTES : cocher l'une, l'autre, ou les deux — c'est
+        # ce qui décide ce qu'on améliore (bâtiments et/ou remparts).
+        "upgrade_buildings": True,
+        "upgrade_walls":     False,
         "keep_workers_free": 0,    # ouvriers à ne PAS faire travailler
+        # Règle « événement » : un ouvrier SUPPLÉMENTAIRE (payant en gemmes) peut
+        # apparaître lors d'un événement. Si activée et que le TOTAL d'ouvriers
+        # atteint reserve_event_total (ex. 7), on garde reserve_event_keep libre(s).
+        "reserve_event_enabled": False,
+        "reserve_event_total":   7,
+        "reserve_event_keep":    1,
         "max_upgrades":      10,   # garde-fou : améliorations max par session
-        "max_scrolls":       8,    # scrolls max pour cette automatisation
-        "scroll_amount":     -210, # intensité du scroll (négatif = vers le bas)
-        "debug_ocr":         False,# enregistre les captures filtrées vues par l'OCR
+        "debug_ocr":         False,# enregistre les captures OCR (si coché)
         "exclude_list":      [],   # noms d'améliorations à NE JAMAIS lancer
-        "place_new_building": False,# autorise le placement d'un nouveau bâtiment (« Nouv. »)
-    },
-}
+        "place_new_building": False,
+    })
+    return cfg
 
 
-# Assistant de configuration propre à ce module (le reste — liste, séparateur,
-# scroll, boutons remparts — se configure dans l'onglet Auto Remparts).
-UPGRADES_CONFIG_STEPS = [
+UPGRADES_DEFAULT_CONFIG = _build_default_config()
+
+
+# Assistant de configuration UNIQUE : toutes les coordonnées de base (remparts :
+# ouvriers, or, élixir, liste, séparateur, boutons remparts, clic neutre) PUIS
+# les éléments propres aux améliorations (élixir noir, zone « Améliorer »,
+# bouton « Confirmer »). Tout est enregistré dans la MÊME config.
+UPGRADES_CONFIG_STEPS = list(WALLS_CONFIG_STEPS) + [
     ("zones.elexir_noir",  "zone",
      "Zone ELEXIR NOIR",
      "Délimitez le rectangle autour du montant d'ÉLIXIR NOIR (ressource sombre, en haut à droite de l'écran)."),
@@ -86,15 +108,30 @@ UPGRADES_CONFIG_STEPS = [
 ]
 
 
-def _deep_copy(d):
-    return json.loads(json.dumps(d))
-
-
 def _merge_config(data: dict) -> dict:
-    """Fusionne un dict de config (partiel) avec les valeurs par défaut."""
+    """Fusionne une config (partielle) avec les défauts unifiés.
+
+    Pont de MIGRATION : si la config enregistrée ne contient pas les coordonnées
+    de base (ancienne config d'améliorations, qui ne stockait que ses propres
+    champs), on les récupère depuis walls_config.json pour ne pas casser les
+    installations existantes. Les NOUVELLES sauvegardes sont auto-suffisantes
+    (toutes les coordonnées écrites) et priment donc sur ce repli."""
     cfg = _deep_copy(UPGRADES_DEFAULT_CONFIG)
+    data = data or {}
+    # Repli : coordonnées de base issues de l'ancien fichier partagé (si présent).
+    try:
+        walls = load_walls_config()
+        for section in ("zones", "buttons", "params"):
+            cfg[section].update(walls.get(section, {}))
+    except Exception:
+        pass
+    # Config demandée (auto-suffisante) : prime sur les défauts ET sur le repli.
     for section in ("zones", "buttons", "params"):
-        cfg.setdefault(section, {}).update((data or {}).get(section, {}))
+        cfg.setdefault(section, {}).update(data.get(section, {}))
+    # Migration de l'ancienne case unique « inclure remparts » → « upgrade_walls ».
+    dp = data.get("params") or {}
+    if "include_remparts" in dp and "upgrade_walls" not in dp:
+        cfg["params"]["upgrade_walls"] = bool(dp["include_remparts"])
     return cfg
 
 
@@ -153,27 +190,28 @@ class UpgradesRunner(WallsUpgrader):
         None/None = config active (upgrades_config.json)."""
         super().__init__(log_callback=log_callback, stop_event=stop_event)
         if config_data is not None:
-            self.ucfg = _merge_config(config_data)
+            cfg = _merge_config(config_data)
             self.log("[Upgrades] Config embarquée (instantané orchestration).")
         else:
-            self.ucfg = load_upgrades_config(config_file)
+            cfg = load_upgrades_config(config_file)
             if config_file:
                 self.log(f"[Upgrades] Config chargée : {config_file}")
-        # Scroll propre à cette automatisation : surcharge les valeurs
-        # héritées de walls_config pour _scroll_list / max_scrolls.
-        self.cfg["params"]["max_scrolls"]   = int(self.ucfg["params"].get("max_scrolls", 8))
-        self.cfg["params"]["scroll_amount"] = int(self.ucfg["params"].get("scroll_amount", -210))
-        # Debug OCR : enregistre les captures filtrées vues par l'OCR à chaque
-        # lecture (case à cocher de l'onglet Améliorations).
-        self.debug_ocr = bool(self.ucfg["params"].get("debug_ocr", False))
-        # Liste d'exclusion : noms d'améliorations à ne jamais lancer, normalisés
-        # (minuscule, sans accents ni espaces) pour une comparaison robuste.
+        # La config unifiée est AUTO-SUFFISANTE : elle sert à la fois de config de
+        # base (forme « remparts » : zones/boutons/délais/scroll) et de config
+        # d'améliorations. self.ucfg est un ALIAS de self.cfg (même dict) pour que
+        # tout le code existant (self.cfg[...] et self.ucfg[...]) pointe dessus.
+        self.cfg = cfg
+        self.ucfg = cfg
+        # Debug OCR : enregistre les captures vues par l'OCR (case à cocher).
+        self.debug_ocr = bool(cfg["params"].get("debug_ocr", False))
+        # Liste d'exclusion : noms à ne jamais lancer, normalisés (minuscule, sans
+        # accents ni espaces) pour une comparaison robuste.
         self._excludes = [normalize_upgrade_name(e)
-                          for e in self.ucfg["params"].get("exclude_list", [])
+                          for e in cfg["params"].get("exclude_list", [])
                           if normalize_upgrade_name(e)]
         # Placement d'un nouveau bâtiment (« Nouv. ») : option non encore
         # implémentée — le flag est lu et conservé pour un usage futur.
-        self.place_new_building = bool(self.ucfg["params"].get("place_new_building", False))
+        self.place_new_building = bool(cfg["params"].get("place_new_building", False))
 
     # ---------- lectures ----------
 
@@ -314,10 +352,12 @@ class UpgradesRunner(WallsUpgrader):
             return "symbole de ressource non identifié"
         is_wall = self.cfg["params"].get("keyword", "rempart").lower() in row["name"].lower()
         if is_wall:
-            if not p.get("include_remparts", False):
-                return "rempart (désactivé)"
+            if not p.get("upgrade_walls", False):
+                return "rempart (case « Remparts » décochée)"
             if symbol == "elexir_noir":
                 return "rempart avec symbole noir (incohérent)"
+        elif not p.get("upgrade_buildings", True):
+            return "bâtiment (case « Bâtiments » décochée)"
         if not p.get(f"use_{symbol}", True):
             return f"type {symbol} décoché"
         # Payable ? On se fie à la COULEUR du prix (blanc = oui, rouge = non),
@@ -384,7 +424,6 @@ class UpgradesRunner(WallsUpgrader):
                 return False
 
             p = self.ucfg["params"]
-            keep = max(0, int(p.get("keep_workers_free", 0)))
             max_up = max(1, int(p.get("max_upgrades", 10)))
             done = 0
 
@@ -392,9 +431,12 @@ class UpgradesRunner(WallsUpgrader):
                 if self._stop_requested():
                     break
                 state = self.read_full_state()
+                # Réserve calculée à CHAQUE tour à partir du total lu : la règle
+                # « événement » ne s'applique que si le total atteint le seuil.
+                keep = self._effective_keep(p, state["workers_total"])
                 if state["workers_free"] - keep < 1:
                     self.log(f"Ouvriers insuffisants (libres={state['workers_free']}, "
-                             f"à préserver={keep}).")
+                             f"total={state['workers_total']}, à préserver={keep}).")
                     break
                 if not self._upgrade_first_possible(state):
                     self.log("Aucune amélioration réalisable dans la liste.")
