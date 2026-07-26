@@ -5,7 +5,10 @@ customtkinter>=5.2
 requests>=2.28
 pandas>=1.5
 pyarrow>=10.0
-numpy>=1.23
+# NumPy < 2 : pyarrow 14.x et numexpr (wheels compilés pour NumPy 1.x) plantent
+# avec NumPy 2 (« _ARRAY_API not found »). pyarrow ne gère NumPy 2 qu'à partir de
+# la 16.x. On borne donc NumPy pour rester compatible avec tous les wheels.
+numpy>=1.23,<2
 python-dotenv>=1.0
 tqdm>=4.64
 matplotlib>=3.6
