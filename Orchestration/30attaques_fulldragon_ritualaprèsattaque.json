@@ -1,0 +1,20 @@
+{
+    "type": "attack",
+    "name": "30attaques_fulldragon_ritualaprèsattaque",
+    "accounts": [
+        {
+            "name": "petitlulu",
+            "switch_file": "switchptitlulu.json",
+            "army_file": "selectfirstarmy.json",
+            "to_night_file": "",
+            "to_main_file": ""
+        }
+    ],
+    "attaques": 30,
+    "attaques_night": 0,
+    "strategy_file": "attaque/attaquenorlalefulldragon.json",
+    "night_strategy_file": "",
+    "upgrades_every": 0,
+    "research_every": 0,
+    "after_attack_file": "aprèschaqueattaque_coffre+demandetroupes.json"
+}

@@ -1,0 +1,68 @@
+{
+    "buttons": {
+        "supprimer": {
+            "x": 958,
+            "y": 843
+        },
+        "coin": {
+            "x": 0,
+            "y": 0
+        },
+        "ouvrir_profil": {
+            "x": 68,
+            "y": 77
+        }
+    },
+    "zones": {
+        "tag_joueur": {
+            "x1": 328,
+            "y1": 320,
+            "x2": 498,
+            "y2": 354
+        }
+    },
+    "triangles": {
+        "haut": [
+            [
+                294,
+                664
+            ],
+            [
+                1033,
+                125
+            ],
+            [
+                1756,
+                662
+            ]
+        ],
+        "bas": [
+            [
+                153,
+                288
+            ],
+            [
+                888,
+                837
+            ],
+            [
+                1608,
+                289
+            ]
+        ]
+    },
+    "actions": {
+        "dezoom": "",
+        "placement_haut": "",
+        "placement_bas": ""
+    },
+    "base_plans": {},
+    "params": {
+        "remove_obstacles": true,
+        "apply_base_plan": true,
+        "step": 40,
+        "repeat": 1,
+        "delay_between": 0.03,
+        "delay_action": 2.0
+    }
+}

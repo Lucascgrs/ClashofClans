@@ -1,0 +1,21 @@
+{
+    "type": "invite",
+    "name": "invit200_20_hdv17",
+    "mode": "aleatoire",
+    "filters": {
+        "min_townhall": 17,
+        "min_xp": 185,
+        "min_donations": 0,
+        "exclude_unranked": true,
+        "require_activity": true,
+        "min_league_id": 29000012
+    },
+    "location_ids": [
+        32000087
+    ],
+    "different_name": 200,
+    "nb_of_clan_with_the_same_name": 20,
+    "do_search": true,
+    "do_invite": true,
+    "scan_limit_players": 2000
+}
