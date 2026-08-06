@@ -2,25 +2,25 @@
     "zones": {
         "liste_recherches": {
             "x1": 448,
-            "y1": 151,
-            "x2": 1031,
-            "y2": 820
+            "y1": 157,
+            "x2": 1028,
+            "y2": 816
         },
         "ouvriers": {
-            "x1": 703,
-            "y1": 40,
-            "x2": 793,
-            "y2": 81
+            "x1": 702,
+            "y1": 41,
+            "x2": 791,
+            "y2": 80
         }
     },
     "buttons": {
         "info_recherches": {
-            "x": 620,
-            "y": 23
+            "x": 617,
+            "y": 25
         },
         "confirmer": {
-            "x": 1336,
-            "y": 954
+            "x": 1318,
+            "y": 931
         }
     },
     "params": {
@@ -32,7 +32,7 @@
         "reserve_event_total": 2,
         "reserve_event_keep": 1,
         "max_upgrades": 1,
-        "max_scrolls": 3,
+        "max_scrolls": 8,
         "scroll_amount": -210,
         "price_split_x": 812,
         "debug_ocr": false,
@@ -43,7 +43,6 @@
         "new_min_pixels": 60,
         "progress_min_pixels": 155,
         "click_x_offset": 30,
-        "click_y_offset": 0,
-        "open_lab_macro": ""
+        "click_y_offset": 0
     }
 }
