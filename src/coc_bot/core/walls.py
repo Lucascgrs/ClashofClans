@@ -232,19 +232,25 @@ class WallsUpgrader:
             img = self._cam.grab(region=(x1, y1, x2, y2))
         return img, (x1, y1)
 
-    def _binarize_white(self, img_rgb):
-        """Binarise une capture : le TEXTE BLANC ressort en blanc sur fond noir
-        (seuil 230). Réutilisé par _grab et par les débogages OCR."""
+    def _binarize_white(self, img_rgb, threshold: int = 230):
+        """Binarise une capture : le texte ressort en blanc sur fond noir.
+        `threshold` : seuil fixe (230 par défaut, adapté au texte BLANC pur).
+        `threshold=None` → seuil automatique (Otsu), pour un texte plus terne
+        (ex. le tag joueur, GRIS et non blanc — sinon invisible au seuil 230).
+        Réutilisé par _grab et par les débogages OCR."""
         gray = cv2.cvtColor(img_rgb, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY)
+        if threshold is None:
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        else:
+            _, thresh = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
         return thresh
 
-    def _grab(self, zone: dict):
+    def _grab(self, zone: dict, threshold: int = 230):
         """Capture binarisée d'une zone. Retourne (image, (offset_x, offset_y))."""
         img, (x1, y1) = self._grab_color(zone)
         if img is None:
             return None, (x1, y1)
-        return self._binarize_white(img), (x1, y1)
+        return self._binarize_white(img, threshold), (x1, y1)
 
     def _dump_ocr_filter(self, img, tag: str) -> None:
         """Enregistre l'image FILTRÉE telle que la voit l'OCR (mode debug)."""
@@ -265,9 +271,9 @@ class WallsUpgrader:
             self._dump_ocr_filter(img, tag)
         return self._reader.readtext(img)
 
-    def _ocr_text(self, zone: dict) -> str:
+    def _ocr_text(self, zone: dict, threshold: int = 230) -> str:
         self._init_capture()
-        img, _ = self._grab(zone)
+        img, _ = self._grab(zone, threshold)
         if img is None:
             return ""
         results = self._readtext(img, "res")

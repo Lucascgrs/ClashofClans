@@ -285,7 +285,9 @@ class BaseLayoutRunner(WallsUpgrader):
         self._click_xy(b["x"], b["y"], delay=wait)
         if self._stop_requested():
             return ""
-        raw = self._ocr_text(zone)
+        # Seuil auto (Otsu) : le tag joueur est GRIS (pas blanc pur), donc
+        # invisible avec le seuil fixe à 230 utilisé pour le reste de l'OCR.
+        raw = self._ocr_text(zone, threshold=None)
         tag = self._normalize_tag(raw)
         self.log(f"Tag lu : '{raw.strip()}' → {tag or '(illisible)'}")
         return tag
