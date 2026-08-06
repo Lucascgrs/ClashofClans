@@ -20,8 +20,10 @@ améliorations / recherches, sélectionnables par compte en multicompte) :
    placement diffèrent.
 
 2. **Plan de base par niveau d'HDV** : on OUVRE le profil du joueur (clic sur un
-   point configuré), on LIT son tag par OCR (zone configurée), puis on interroge
-   l'API CoC pour connaître le niveau d'HDV. On récupère enfin le LIEN de partage
+   point configuré), on clique sur « Partager l'identifiant » puis sur « Copier »
+   (deux points configurés) — le jeu copie alors le tag dans le PRESSE-PAPIERS,
+   qu'on lit directement (plus fiable qu'une lecture OCR). On interroge ensuite
+   l'API CoC pour connaître le niveau d'HDV, puis on récupère le LIEN de partage
    de plan associé à ce niveau (liste de correspondance HDV → lien) et on
    l'actionne — ce qui ouvre CoC — APRÈS le retrait des obstacles.
 
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pyautogui
 
@@ -51,14 +54,13 @@ BASE_DEFAULT_CONFIG = {
         # Coin haut-gauche (0,0) : clic neutre qui referme la pop-up entre deux
         # obstacles (commun haut/bas).
         "coin":          {"x": 5, "y": 5},
-        # Point à cliquer pour OUVRIR le profil du joueur (afin d'y lire le tag).
+        # Point à cliquer pour OUVRIR le profil du joueur (afin d'y copier le tag).
         "ouvrir_profil": {"x": 0, "y": 0},
-    },
-    "zones": {
-        # Zone OCR contenant le TAG du joueur (dans le profil ouvert). Le tag
-        # sert à interroger l'API pour connaître le niveau d'HDV. {0,0,0,0} = non
-        # configurée.
-        "tag_joueur": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
+        # Point « Partager l'identifiant » (dans le profil ouvert) : fait
+        # apparaître l'option « Copier ».
+        "partager_identifiant": {"x": 0, "y": 0},
+        # Point « Copier » : copie le tag du joueur dans le presse-papiers.
+        "copier_id": {"x": 0, "y": 0},
     },
     "triangles": {
         # 3 sommets [[x, y], [x, y], [x, y]] chacun. [] = non configuré.
@@ -85,7 +87,7 @@ BASE_DEFAULT_CONFIG = {
 }
 
 
-# Assistant de configuration : 2 points fixes + 2 triangles + zone OCR HDV.
+# Assistant de configuration : 2 points fixes + 2 triangles + 3 points HDV.
 BASE_CONFIG_STEPS = [
     ("buttons.supprimer", "point",
      "Bouton SUPPRIMER (obstacle)",
@@ -109,13 +111,17 @@ BASE_CONFIG_STEPS = [
      "Point OUVRIR LE PROFIL",
      "Placez la souris sur l'élément à cliquer pour OUVRIR le profil du joueur "
      "(celui qui affiche le tag), puis appuyez sur ENTRÉE. Le bot cliquera ici "
-     "avant de lire le tag."),
-    ("zones.tag_joueur", "zone",
-     "Zone TAG JOUEUR (OCR)",
-     "Ouvrez le profil du joueur, puis délimitez le rectangle autour du TAG "
-     "(ex. « #ABC123XY »). Le tag lu sert à interroger l'API pour connaître le "
-     "niveau d'HDV. Si vous ne l'utilisez pas, laissez une zone NULLE (2 coins "
-     "au même point)."),
+     "avant de copier le tag."),
+    ("buttons.partager_identifiant", "point",
+     "Point PARTAGER L'IDENTIFIANT",
+     "Dans le profil ouvert, placez la souris sur le bouton « Partager "
+     "l'identifiant » (celui qui fait apparaître l'option « Copier »), puis "
+     "appuyez sur ENTRÉE."),
+    ("buttons.copier_id", "point",
+     "Point COPIER",
+     "Placez la souris sur le bouton « Copier » qui vient d'apparaître (celui "
+     "qui copie le tag du joueur dans le presse-papiers), puis appuyez sur "
+     "ENTRÉE."),
 ]
 
 
@@ -127,7 +133,7 @@ def _merge_config(data: dict) -> dict:
     """Fusionne une config (partielle) avec les valeurs par défaut."""
     cfg = _deep_copy(BASE_DEFAULT_CONFIG)
     data = data or {}
-    for section in ("buttons", "zones", "triangles", "actions", "params"):
+    for section in ("buttons", "triangles", "actions", "params"):
         if isinstance(data.get(section), dict):
             cfg.setdefault(section, {}).update(data[section])
     if isinstance(data.get("base_plans"), dict):
@@ -251,45 +257,62 @@ class BaseLayoutRunner(WallsUpgrader):
         if wait_after:
             self._sleep(wait_after)
 
-    # ---------- lecture du niveau d'HDV (profil → tag OCR → API) ----------
+    # ---------- lecture du niveau d'HDV (profil → copier tag → API) ----------
 
-    # Alphabet des tags Clash of Clans (base 14, choisi SANS caractères ambigus :
-    # ni O, ni I, ni 1, ni Z…). Sert à nettoyer le tag lu par OCR.
-    _TAG_ALPHABET = set("0289PYLQGRJCUV")
+    # Motif d'un tag CoC (ex. « #2ABC89PY ») : au cas où le presse-papiers
+    # contiendrait davantage de texte que le seul tag.
+    _TAG_RE = re.compile(r"#[0-9A-Z]{3,}")
 
     def read_hdv_level(self) -> int:
-        """Ouvre le profil, lit le tag par OCR, puis interroge l'API."""
+        """Ouvre le profil, copie le tag (presse-papiers), puis interroge l'API."""
         tag = self._read_player_tag()
         if not tag:
             return 0
         return self._read_hdv_api(tag)
 
     def _normalize_tag(self, raw: str) -> str:
-        """Nettoie un tag lu par OCR : majuscules, O→0, on ne garde que les
-        caractères de l'alphabet des tags CoC, et on préfixe par « # »."""
-        s = (raw or "").upper().replace("O", "0")
-        core = "".join(ch for ch in s if ch in self._TAG_ALPHABET)
-        return ("#" + core) if core else ""
+        """Extrait le tag CoC du texte copié dans le presse-papiers (majuscules,
+        préfixé par « # »)."""
+        s = (raw or "").strip().upper()
+        m = self._TAG_RE.search(s)
+        if m:
+            return m.group(0)
+        return ("#" + s.lstrip("#")) if s else ""
 
     def _read_player_tag(self) -> str:
-        b = self.bcfg["buttons"].get("ouvrir_profil") or {}
-        zone = self.bcfg["zones"].get("tag_joueur") or {}
-        if not (int(b.get("x", 0)) or int(b.get("y", 0))):
+        """Ouvre le profil, clique « Partager l'identifiant » puis « Copier »,
+        et lit le tag copié dans le presse-papiers (plus fiable qu'une lecture
+        OCR : le tag est affiché en GRIS, pas en blanc)."""
+        b_profil = self.bcfg["buttons"].get("ouvrir_profil") or {}
+        b_partager = self.bcfg["buttons"].get("partager_identifiant") or {}
+        b_copier = self.bcfg["buttons"].get("copier_id") or {}
+        if not (int(b_profil.get("x", 0)) or int(b_profil.get("y", 0))):
             self.log("⚠ Point « Ouvrir profil » non configuré (assistant onglet Base).")
             return ""
-        if int(zone.get("x2", 0)) <= int(zone.get("x1", 0)):
-            self.log("⚠ Zone « Tag joueur » non configurée (assistant onglet Base).")
+        if not (int(b_partager.get("x", 0)) or int(b_partager.get("y", 0))):
+            self.log("⚠ Point « Partager l'identifiant » non configuré (assistant onglet Base).")
+            return ""
+        if not (int(b_copier.get("x", 0)) or int(b_copier.get("y", 0))):
+            self.log("⚠ Point « Copier » non configuré (assistant onglet Base).")
             return ""
         wait = float(self.bcfg["params"].get("delay_action", 2.0))
-        self.log("→ Ouverture du profil pour lire le tag.")
-        self._click_xy(b["x"], b["y"], delay=wait)
+        import pyperclip
+        self.log("→ Ouverture du profil.")
+        self._click_xy(b_profil["x"], b_profil["y"], delay=wait)
         if self._stop_requested():
             return ""
-        # Seuil auto (Otsu) : le tag joueur est GRIS (pas blanc pur), donc
-        # invisible avec le seuil fixe à 230 utilisé pour le reste de l'OCR.
-        raw = self._ocr_text(zone, threshold=None)
+        self.log("→ Partage de l'identifiant.")
+        self._click_xy(b_partager["x"], b_partager["y"], delay=wait)
+        if self._stop_requested():
+            return ""
+        pyperclip.copy("")  # vide le presse-papiers : détecte un échec de copie
+        self.log("→ Copie du tag dans le presse-papiers.")
+        self._click_xy(b_copier["x"], b_copier["y"], delay=wait)
+        if self._stop_requested():
+            return ""
+        raw = pyperclip.paste()
         tag = self._normalize_tag(raw)
-        self.log(f"Tag lu : '{raw.strip()}' → {tag or '(illisible)'}")
+        self.log(f"Tag copié : '{raw.strip()}' → {tag or '(vide)'}")
         return tag
 
     def _read_hdv_api(self, tag: str) -> int:
@@ -426,7 +449,7 @@ class BaseLayoutRunner(WallsUpgrader):
 
     def run(self) -> bool:
         """Retire les obstacles (si activé) puis, si la pose du plan est activée,
-        lit le niveau d'HDV (profil → tag → API) et actionne le lien associé."""
+        lit le niveau d'HDV (profil → copier tag → API) et actionne le lien associé."""
         try:
             p = self.bcfg["params"]
             if p.get("remove_obstacles", True) and not self._stop_requested():

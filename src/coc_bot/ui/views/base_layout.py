@@ -84,10 +84,11 @@ class BaseLayoutView(BaseView):
         hdv.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         hint_label(
             hdv.body,
-            "Le niveau d'HDV est déterminé automatiquement : clic sur le point\n"
-            "« Ouvrir profil » → lecture du TAG par OCR (zone dédiée) → interrogation\n"
-            "de l'API CoC (townHallLevel). Configurez le point et la zone via\n"
-            "l'assistant ci-dessous. L'API nécessite DEV_EMAIL / DEV_PASSWORD (.env)."
+            "Le niveau d'HDV est déterminé automatiquement : clic sur « Ouvrir\n"
+            "profil » → « Partager l'identifiant » → « Copier » (le tag est copié\n"
+            "dans le presse-papiers) → interrogation de l'API CoC (townHallLevel).\n"
+            "Configurez les 3 points via l'assistant ci-dessous. L'API nécessite\n"
+            "DEV_EMAIL / DEV_PASSWORD (.env)."
         ).grid(row=0, column=0, sticky="w")
 
         # --- Macros de placement ---------------------------------------
@@ -156,7 +157,7 @@ class BaseLayoutView(BaseView):
         conf.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         r1 = ctk.CTkFrame(conf.body, fg_color="transparent")
         r1.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(r1, text="⚙ Définir Supprimer, coin, triangles, profil & tag",
+        ctk.CTkButton(r1, text="⚙ Définir Supprimer, coin, triangles, profil, partage & copie",
                       command=self._wizard).pack(side="left", padx=(0, theme.PAD_S), pady=2)
         ctk.CTkButton(r1, text="📋 Config actuelle", command=self._show_config
                       ).pack(side="left", padx=(0, theme.PAD_S), pady=2)
@@ -322,7 +323,7 @@ class BaseLayoutView(BaseView):
                     return
                 runner = base_layout.BaseLayoutRunner(log_callback=self._log,
                                                       stop_event=self.stop_event)
-                self._log("--- Test lecture du niveau d'HDV (profil → tag → API) ---")
+                self._log("--- Test lecture du niveau d'HDV (profil → copier tag → API) ---")
                 lvl = runner.read_hdv_level()
                 plans = base_layout.load_base_config().get("base_plans", {})
                 link = plans.get(str(lvl)) if lvl else None
