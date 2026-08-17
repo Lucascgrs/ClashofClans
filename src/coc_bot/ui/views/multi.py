@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from ...core import multi_account, upgrades, research
+from ...core import multi_account, upgrades, research, base_layout
 from .. import theme
 from ..base_view import BaseView
 from ..widgets import Card, LogPanel, Dialog, styled_treeview, hint_label
@@ -33,10 +33,11 @@ class MultiView(BaseView):
         # --- Comptes ---------------------------------------------------
         accounts = Card(body, title="Comptes (exécutés dans l'ordre)")
         accounts.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
-        cols = ("switch", "armee", "attaque", "nb", "rituel", "tous_les", "config")
+        cols = ("switch", "base", "armee", "attaque", "nb", "rituel", "tous_les", "config")
         self.tree = styled_treeview(accounts.body, columns=cols, height=8)
         self.tree.heading("#0", text="Nom")
-        for c, txt, w in [("switch", "Switch", 140), ("armee", "Armée", 140),
+        for c, txt, w in [("switch", "Switch", 140), ("base", "Base/Obstacle", 110),
+                          ("armee", "Armée", 140),
                           ("attaque", "Attaque", 140), ("nb", "Nb", 44),
                           ("rituel", "Rituel", 90), ("tous_les", "Ttes les", 60),
                           ("config", "Config amélio.", 120)]:
@@ -67,9 +68,10 @@ class MultiView(BaseView):
                       ).pack(side="left")
         hint_label(
             opt.body,
-            "Pour chaque compte : switch → sélection d'armée → N attaques, avec rituel\n"
-            "optionnel (remparts OU améliorations — un seul) toutes les X attaques.\n"
-            "L'état courant est restauré automatiquement au démarrage."
+            "Pour chaque compte : switch → Base/Obstacle (optionnel) → sélection\n"
+            "d'armée → N attaques, avec rituel optionnel (remparts OU améliorations —\n"
+            "un seul) toutes les X attaques. L'état courant est restauré automatiquement\n"
+            "au démarrage."
         ).grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
         # --- Actions ---------------------------------------------------
@@ -119,8 +121,9 @@ class MultiView(BaseView):
             rit = " + ".join(labels) or "Aucun"
             every = " / ".join(everys)
             cfgname = " ".join(cfgs)
+            base_txt = ((e.get("base_config") or "(active)") if e.get("base_enabled") else "—")
             self.tree.insert("", "end", iid=str(i), text=e.get("name") or "(sans nom)",
-                             values=(e.get("switch_file", ""), e.get("army_file", ""),
+                             values=(e.get("switch_file", ""), base_txt, e.get("army_file", ""),
                                      e.get("attack_file", ""), e.get("nb_attacks", 0),
                                      rit, every, cfgname))
 
@@ -201,6 +204,7 @@ class MultiView(BaseView):
         action_files = [""] + list(self.app.action_files)
         named_cfgs = [""] + upgrades.list_named_configs()
         research_cfgs = [""] + research.list_named_configs()
+        base_cfgs = [""] + base_layout.list_named_configs()
 
         dlg = Dialog(self, "Nouveau compte" if is_new else f"Édition — {entry.get('name', '')}",
                      width=540, height=600, resizable=True)
@@ -228,6 +232,8 @@ class MultiView(BaseView):
         v_research_every   = tk.IntVar(value=int(entry.get("research_every", 5)))
         v_after_enabled = tk.BooleanVar(value=bool(entry.get("after_attack_file")))
         v_after_file    = tk.StringVar(value=entry.get("after_attack_file", ""))
+        v_base_enabled = tk.BooleanVar(value=bool(entry.get("base_enabled")))
+        v_base_config  = tk.StringVar(value=entry.get("base_config", ""))
 
         def label(r, text):
             ctk.CTkLabel(wrap, text=text, anchor="w").grid(row=r, column=0, sticky="w", pady=6, padx=(0, theme.PAD_S))
@@ -236,16 +242,34 @@ class MultiView(BaseView):
         ctk.CTkEntry(wrap, textvariable=v_name).grid(row=0, column=1, sticky="ew", pady=6)
         label(1, "Script switch compte :")
         ctk.CTkComboBox(wrap, variable=v_switch, values=action_files).grid(row=1, column=1, sticky="ew", pady=6)
-        label(2, "Sélection d'armée :")
-        ctk.CTkComboBox(wrap, variable=v_army, values=action_files).grid(row=2, column=1, sticky="ew", pady=6)
-        label(3, "Fichier d'attaque :")
-        ctk.CTkComboBox(wrap, variable=v_attack, values=action_files).grid(row=3, column=1, sticky="ew", pady=6)
-        label(4, "Nb attaques :")
-        ctk.CTkEntry(wrap, textvariable=v_nb, width=80).grid(row=4, column=1, sticky="w", pady=6)
+
+        label(2, "Base/Obstacle :")
+        base_row = ctk.CTkFrame(wrap, fg_color="transparent")
+        base_row.grid(row=2, column=1, sticky="ew", pady=6)
+        cb_base = ctk.CTkComboBox(base_row, variable=v_base_config, values=base_cfgs, width=200)
+
+        def update_base_state():
+            cb_base.configure(state="normal" if v_base_enabled.get() else "disabled")
+
+        ctk.CTkCheckBox(base_row, text="Activer", width=20, variable=v_base_enabled,
+                        command=update_base_state).pack(side="left", padx=(0, theme.PAD_S))
+        cb_base.pack(side="left", fill="x", expand=True)
+        update_base_state()
+        hint_label(
+            wrap, "Exécuté après le switch, avant la sélection d'armée (vide = config\n"
+            "active de l'écran Base / Obstacles)."
+        ).grid(row=3, column=1, sticky="w")
+
+        label(4, "Sélection d'armée :")
+        ctk.CTkComboBox(wrap, variable=v_army, values=action_files).grid(row=4, column=1, sticky="ew", pady=6)
+        label(5, "Fichier d'attaque :")
+        ctk.CTkComboBox(wrap, variable=v_attack, values=action_files).grid(row=5, column=1, sticky="ew", pady=6)
+        label(6, "Nb attaques :")
+        ctk.CTkEntry(wrap, textvariable=v_nb, width=80).grid(row=6, column=1, sticky="w", pady=6)
 
         # --- Rituel principal : améliorations (bâtiments et/ou remparts) --
         rit = Card(wrap, title="Rituel principal toutes les X attaques (améliorations : bâtiments/remparts)")
-        rit.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
+        rit.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
         rrow = ctk.CTkFrame(rit.body, fg_color="transparent")
         rrow.grid(row=0, column=0, sticky="w")
         cb_ucfg = ctk.CTkComboBox(rit.body, variable=v_ucfg, values=named_cfgs, width=260)
@@ -270,7 +294,7 @@ class MultiView(BaseView):
 
         # --- Recherche : CUMULABLE, avec sa propre fréquence -----------
         res = Card(wrap, title="Recherche (cumulable — fréquence propre)")
-        res.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
+        res.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
         cb_rcfg = ctk.CTkComboBox(res.body, variable=v_rcfg, values=research_cfgs, width=260)
         res_every_row = ctk.CTkFrame(res.body, fg_color="transparent")
         ent_res_every = ctk.CTkEntry(res_every_row, textvariable=v_research_every, width=60)
@@ -297,7 +321,7 @@ class MultiView(BaseView):
 
         # --- Action après chaque attaque -------------------------------
         after = Card(wrap, title="Après chaque attaque")
-        after.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
+        after.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(theme.PAD_S, 0))
         cb_after = ctk.CTkComboBox(after.body, variable=v_after_file, values=action_files, width=260)
 
         def update_after_state():
@@ -321,6 +345,8 @@ class MultiView(BaseView):
                 return
             new_entry = {
                 "name": name, "switch_file": v_switch.get().strip(),
+                "base_enabled": bool(v_base_enabled.get()),
+                "base_config": v_base_config.get().strip(),
                 "army_file": v_army.get().strip(), "attack_file": v_attack.get().strip(),
                 "nb_attacks": max(0, int(v_nb.get())), "ritual": v_ritual.get(),
                 "ritual_every": max(1, int(v_every.get())),

@@ -5,6 +5,8 @@ Chaque compte est décrit par une entrée :
     {
         "name":            "Lucas",
         "switch_file":     "switch/switch_lucas_.json",  # macro de changement de compte
+        "base_enabled":    False,                        # poser une config Base/Obstacle après le switch
+        "base_config":     "",                           # config nommée Base ("" = config active de l'écran Base)
         "army_file":       "armee/selectfirstarmy.json", # macro de sélection d'armée ("" = aucune)
         "attack_file":     "attaque/attaquehdv13.json",  # macro d'attaque
         "nb_attacks":      10,                           # attaques avec ce compte
@@ -16,6 +18,10 @@ Chaque compte est décrit par une entrée :
         "research_config": "",                           # config nommée de recherche
         "after_attack_file": ""                          # macro rejouée après CHAQUE attaque ("" = aucune)
     }
+
+Le Base/Obstacle s'exécute une seule fois par passage sur le compte, JUSTE
+APRÈS le switch et AVANT la sélection d'armée (ni lié aux attaques, ni
+répété comme le rituel principal).
 
 Le rituel principal « améliorations » gère bâtiments ET/OU remparts selon les
 cases de sa config (fusion des anciens rituels remparts/améliorations). La
@@ -44,6 +50,8 @@ MULTI_CONFIG_DIR = str(_MULTI_CONFIG_DIR)
 DEFAULT_ENTRY = {
     "name":            "",
     "switch_file":     "",
+    "base_enabled":    False,
+    "base_config":     "",
     "army_file":       "",
     "attack_file":     "",
     "nb_attacks":      10,
@@ -84,6 +92,7 @@ def normalize_entry(entry: dict) -> dict:
     if out.get("ritual") not in MAIN_RITUAL_LABELS:
         out["ritual"] = "none"
     out["research_enabled"] = bool(out.get("research_enabled"))
+    out["base_enabled"] = bool(out.get("base_enabled"))
     return out
 
 
@@ -169,6 +178,19 @@ def run_multi_session(
             attack_session._play(switch_file)
             _isleep(delays["after_switch"])
             attack_session._play(neutral)
+
+            if entry.get("base_enabled"):
+                log(f"[{name}] --- Base / Obstacles ---")
+                _isleep(delays.get("before_walls_ritual", 1.5))
+                try:
+                    from .base_layout import BaseLayoutRunner  # import paresseux
+                    BaseLayoutRunner(log_callback=log, stop_event=stop_event,
+                                     config_file=entry.get("base_config") or None).run()
+                except Exception as e:
+                    log(f"[{name}] Erreur Base/Obstacles : {e}")
+                if _stop():
+                    log("Arrêt demandé.")
+                    return
 
             if entry.get("army_file"):
                 if attack_session._play(entry["army_file"]):
