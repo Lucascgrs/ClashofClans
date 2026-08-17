@@ -1,8 +1,8 @@
 [
     {
         "name": "petitlulu",
-        "switch_file": "switchptitlulu.json",
-        "army_file": "selectfirstarmy.json",
+        "switch_file": "switch/switchptitlulu.json",
+        "army_file": "armee/selectfirstarmy.json",
         "to_night_file": "",
         "to_main_file": ""
     }
