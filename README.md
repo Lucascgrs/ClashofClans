@@ -95,8 +95,8 @@ restent toujours visibles en bas de la barre.
 
 | Écran | Rôle |
 |---|---|
-| 🏠 **Accueil** | Vue d'ensemble (macros, comptes, état des configs) et accès rapides |
 | 🔎 **Scanner** | Filtres, sélection des pays, scans joueurs/clans, recherche aléatoire + invitation |
+| 🛰 **Surveillance** | Historique horodaté d'un clan (voir plus bas), scan incrémental, journal d'exécution |
 | 🎮 **Jeu & Attaques** | Macros, enregistreur, gestion des comptes, sessions d'attaques + rituels (remparts / améliorations) |
 | 🧱 **Auto Remparts** | Configuration et lancement de l'amélioration automatique des remparts (OCR + clics) |
 | ⬆ **Auto Améliorations** | Amélioration du premier choix payable de la liste (or / élixir / élixir noir), configs nommées |
@@ -104,7 +104,45 @@ restent toujours visibles en bas de la barre.
 | 🗂 **Orchestration** | Enchaînement / planification horaire de tâches, raccourci d'arrêt d'urgence |
 | 📊 **Données** | Visualisation des parquets scannés, export Excel |
 | 📝 **Tags Joueurs** | Édition manuelle de la liste de tags joueurs |
-| 📜 **Journal** | Journal d'exécution global |
+
+### Surveillance d'un clan
+
+L'écran 🛰 **Surveillance** prend un tag de clan et enregistre, à chaque
+exécution, un relevé daté dans un classeur Excel propre au clan —
+`Surveillance/<TAG>.xlsx`. Rien n'est écrasé : les relevés s'**empilent**, ce
+qui permet de suivre l'évolution des membres dans le temps. Les 5 dernières
+exécutions sont affichées sous le bouton.
+
+| Feuille | Contenu |
+|---|---|
+| `Membres` | 1 ligne par joueur **et par date d'appel** |
+| `Guerres` | 1 ligne par joueur **et par guerre** (classiques et Ligue des clans) |
+| `JournalClan` | 1 ligne par guerre — historique au niveau clan (`/warlog`) |
+| `TagsLDC` | war tags de Ligue des clans archivés |
+| `Appels` | trace de chaque exécution |
+
+Chaque feuille est dédouplonnée sur sa propre clé : relancer la surveillance
+dix fois dans la journée n'ajoute que les nouveautés.
+
+#### Ce que l'API permet — et ne permet pas
+
+L'historique par joueur **ne peut pas être reconstruit rétroactivement**, il se
+construit en surveillant régulièrement :
+
+* `/clans/{tag}/warlog` donne l'historique des guerres **sans aucun détail
+  joueur** (`members` / `attacks` y sont vides par conception) et exige un
+  journal de guerre public ;
+* `/clans/{tag}/currentwar` est le **seul** endpoint détaillant une guerre
+  classique par joueur, et uniquement pendant la guerre ou juste après ;
+* `/clans/{tag}/currentwar/leaguegroup` ne décrit que la **saison LDC en
+  cours** ;
+* `/clanwarleagues/wars/{warTag}` détaille une guerre de LDC par joueur et
+  répond encore des mois plus tard — mais l'API ne permet pas de *retrouver*
+  les tags des saisons passées.
+
+D'où la feuille `TagsLDC` : les war tags sont archivés dès qu'ils apparaissent,
+et le bouton **🔄 Rattraper les LDC archivées** les rejoue pour compléter une
+saison collectée partiellement.
 
 ### Première utilisation
 
@@ -144,12 +182,16 @@ ClashOfClans/
 ├── requirements.txt
 ├── .env.example
 ├── Actions/              # macros JSON enregistrées (données)
-├── Configs/ Orchestration/  # configs nommées (générées)
+├── Configs/              # TOUS les fichiers de configuration JSON
+│   ├── *.json                # configs actives (base, upgrades, research, comptes…)
+│   ├── Base/ Upgrades/ Research/ MultiCompte/   # configs nommées (générées)
+├── Orchestration/        # scénarios d'enchaînement (générés)
 └── src/coc_bot/
     ├── __main__.py       # `python -m coc_bot`
     ├── paths.py          # chemins ABSOLUS centralisés (+ COC_BOT_DATA_DIR)
     ├── core/             # logique métier (indépendante de l'UI)
     │   ├── coc_api.py        # API Clash of Clans : scans, filtres, invitations, exports
+    │   ├── surveillance.py   # historique horodaté d'un clan (membres, guerres, LDC)
     │   ├── token_manager.py  # génération/rafraîchissement du token API Supercell
     │   ├── env_setup.py      # configuration interactive du .env (CustomTkinter)
     │   ├── playback.py       # LecteurPosition — rejeu de macros + DPI awareness
@@ -163,7 +205,9 @@ ClashOfClans/
         ├── app.py            # fenêtre principale (nav latérale, log, arrêt d'urgence)
         ├── theme.py          # couleurs, polices, espacement
         ├── widgets.py        # cartes, journaux, assistants de capture, listes…
-        └── views/            # un écran par module (dashboard, scan, game, walls…)
+        └── views/            # un écran par module (scan, surveillance, game, walls…)
+            └── scan_common.py # filtres + pays + scan incrémental, partagés
+                               # par les écrans Scanner et Surveillance
 ```
 
 > **Réutilisation** : toute la logique vit dans `coc_bot.core` et ne dépend pas
@@ -176,11 +220,13 @@ ClashOfClans/
 | Fichier / dossier | Rôle |
 |---|---|
 | [`Actions/`](Actions/) | Macros JSON enregistrées (séquences souris/clavier horodatées) |
-| `accounts_config.json` | Liste des comptes : nom, fichier switch, armées, flag `switch_army` |
-| `walls_config.json` | Coordonnées des zones OCR et des boutons pour l'auto-remparts, + paramètres (mot-clé, scroll, délais) |
-| `attack_config.json` | Fichiers d'action communs (clic neutre, lose, bateaux, élixir nuit) + délais entre étapes |
-| `coords_config.json` | Coordonnées des clics utilisés par le module d'invitation (`coc_bot.core.coc_api`) |
-| `locations.json` | Cache local des `locationId` Supercell (pays + régions) |
+| [`Configs/`](Configs/) | **Tous les fichiers de configuration JSON** (configs actives à la racine du dossier, configs nommées dans les sous-dossiers `Base/`, `Upgrades/`, `Research/`, `MultiCompte/`) |
+| `Configs/accounts_config.json` | Liste des comptes : nom, fichier switch, armées, flag `switch_army` |
+| `Configs/walls_config.json` | Coordonnées des zones OCR et des boutons pour l'auto-remparts, + paramètres (mot-clé, scroll, délais) |
+| `Configs/attack_config.json` | Fichiers d'action communs (clic neutre, lose, bateaux, élixir nuit) + délais entre étapes |
+| `Configs/coords_config.json` | Coordonnées des clics utilisés par le module d'invitation (`coc_bot.core.coc_api`) |
+| `Configs/locations.json` | Cache local des `locationId` Supercell (pays + régions) |
+| `Configs/leagues.json` | Cache local des ligues Supercell (ordre de progression) |
 | `player_tags.txt` | Liste de tags joueurs (édition manuelle) |
 | `All_Players.parquet`, `All_Clans.parquet` | Données scannées (générées) |
 | `.env` | Identifiants Supercell pour la génération du token (**ne jamais committer**) |
@@ -188,12 +234,15 @@ ClashOfClans/
 > `walls_config.json`, `attack_config.json` et `coords_config.json` sont créés
 > automatiquement avec des valeurs par défaut au premier lancement, puis
 > remplis via les assistants du GUI.
+>
+> Ces fichiers vivaient auparavant à la racine du projet : s'ils y traînent
+> encore, `coc_bot.paths` les déplace tout seul vers `Configs/` au démarrage.
 
 ---
 
 ## Format des configurations
 
-### `accounts_config.json`
+### `Configs/accounts_config.json`
 
 Liste de comptes :
 
@@ -210,12 +259,12 @@ Liste de comptes :
 ```
 
 - `first_army_file` / `second_army_file` peuvent être vides : les valeurs par
-  défaut de `attack_config.json` (`default_first_army`, `default_second_army`)
+  défaut de `Configs/attack_config.json` (`default_first_army`, `default_second_army`)
   sont alors utilisées.
 - `switch_army: true` → la macro `second_army_file` est rejouée entre les
   attaques jour et les attaques nuit.
 
-### `attack_config.json`
+### `Configs/attack_config.json`
 
 ```json
 {
@@ -244,7 +293,7 @@ Liste de comptes :
 Tous les délais sont en secondes. Mettre `null` ou supprimer une clé `actions.*`
 désactive l'étape correspondante.
 
-### `walls_config.json`
+### `Configs/walls_config.json`
 
 ```json
 {
@@ -287,7 +336,7 @@ désactive l'étape correspondante.
 **Ne jamais committer** :
 
 - `.env` (identifiants Supercell)
-- `accounts_config.json` (noms de vos comptes)
+- `Configs/accounts_config.json` (noms de vos comptes)
 - `*_token.json` (tokens API générés)
 
 Ces fichiers sont déjà exclus par `.gitignore`.

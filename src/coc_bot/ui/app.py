@@ -44,8 +44,8 @@ def _force_utf8_io() -> None:
 
 # (clé, icône, libellé, module, classe)
 NAV_ITEMS = [
-    ("dashboard",     "🏠", "Accueil",        "dashboard",     "DashboardView"),
     ("scan",          "🔎", "Scanner",        "scan",          "ScanView"),
+    ("surveillance",  "🛰", "Surveillance",   "surveillance",  "SurveillanceView"),
     ("game",          "🎮", "Jeu & Attaques", "game",          "GameView"),
     ("upgrades",      "⬆",  "Améliorations",  "upgrades",      "UpgradesView"),
     ("research",      "🔬", "Recherches",     "research",      "ResearchView"),
@@ -54,8 +54,10 @@ NAV_ITEMS = [
     ("orchestration", "🗂", "Orchestration",  "orchestration", "OrchestrationView"),
     ("data",          "📊", "Données",        "data",          "DataView"),
     ("tags",          "📝", "Tags Joueurs",   "tags",          "TagsView"),
-    ("logs",          "📜", "Journal",        "logs",          "LogsView"),
 ]
+
+#: Écran affiché au démarrage.
+DEFAULT_VIEW = "scan"
 
 
 class CocBotApp(ctk.CTk):
@@ -103,7 +105,7 @@ class CocBotApp(ctk.CTk):
         self.start_hotkey_listener()
 
         self.refresh_action_files()
-        self.show_view("dashboard")
+        self.show_view(DEFAULT_VIEW)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -184,7 +186,10 @@ class CocBotApp(ctk.CTk):
     # Journal global
     # =====================================================================
     def attach_log_panel(self, panel):
-        """Enregistre le panneau de l'écran Journal et rejoue le buffer."""
+        """Enregistre le panneau de journal affiché et rejoue le buffer.
+
+        L'écran Journal dédié a été retiré : c'est l'écran Surveillance qui
+        héberge désormais ce panneau."""
         self._log_panel = panel
         for line in self._log_buffer:
             panel.log(line)

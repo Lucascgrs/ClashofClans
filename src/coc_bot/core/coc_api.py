@@ -9,7 +9,8 @@ Fonctionnalités :
   - Scan incrémental de joueurs basé sur les clans déjà stockés dans All_Clans.parquet
     → sauvegarde dans All_Players.parquet (reprend depuis la dernière position)
   - Mise à jour partielle des joueurs (positions n à p)
-  - Espionnage de son propre clan (membres + guerre)
+  - Surveillance horodatée d'un clan (membres + guerres + LDC) → voir le module
+    ``surveillance`` ; ``spy_my_clan()`` y délègue.
   - Invitation automatique via pyautogui/pyperclip
 
 Stockage :
@@ -44,8 +45,6 @@ from ..paths import (
     LEAGUES_FILE,
     FILE_ALL_CLANS,
     FILE_ALL_PLAYERS,
-    FILE_EPF_PLAYERS,
-    FILE_GDC,
     PLAYER_TAGS_FILE as FILE_PLAYER_TAGS,
 )
 
@@ -1235,70 +1234,6 @@ def automate_coc_input(text: str):
 
 
 # =============================================================================
-# INFORMATIONS DE GUERRE
-# =============================================================================
-
-def get_last_clan_war_info(clan_tag: str, token: str) -> dict:
-    """Retourne les informations de la guerre actuelle/dernière du clan."""
-    tag_enc = clan_tag.replace("#", "%23")
-    r = requests.get(
-        f"{API_URL}/clans/{tag_enc}/currentwar",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=6,
-    )
-    if r.status_code == 200:
-        return r.json()
-    logging.error(f"Erreur GDC {r.status_code}: {r.text}")
-    return {}
-
-
-def save_clan_war_to_excel(data: dict, filename: str, clan_tag: str):
-    """Enregistre les statistiques de fin de guerre d'un clan dans un fichier Excel."""
-    if not data or data.get("state") != "warEnded":
-        logging.warning("Pas de guerre terminée disponible.")
-        return
-
-    clan = (
-        data["clan"]
-        if data["clan"].get("tag") == clan_tag
-        else data["opponent"]
-    )
-
-    rows = [
-        {
-            "Name"          : m.get("name"),
-            "Tag"           : m.get("tag"),
-            "Map Position"  : m.get("mapPosition"),
-            "Townhall Level": m.get("townhallLevel"),
-            "Attacks Done"  : len(m.get("attacks", [])),
-            "Stars"         : sum(a.get("stars", 0) for a in m.get("attacks", [])),
-            "Destruction %": (
-                sum(a.get("destructionPercentage", 0) for a in m.get("attacks", []))
-                / max(len(m.get("attacks", [])), 1)
-            ),
-            "War End Time"  : data.get("endTime"),
-        }
-        for m in clan.get("members", [])
-    ]
-
-    new_df      = pd.DataFrame(rows)
-    existing_df = _excel_read_sheet(filename, "Sheet1")
-    df = (
-        pd.concat([existing_df, new_df], ignore_index=True)
-        if not existing_df.empty else new_df
-    )
-
-    if os.path.exists(filename):
-        with pd.ExcelWriter(filename, engine="openpyxl", mode="a",
-                            if_sheet_exists="replace") as writer:
-            df.to_excel(writer, sheet_name="Sheet1", index=False)
-    else:
-        df.to_excel(filename, index=False)
-
-    logging.info(f"GDC enregistrée dans {filename}")
-
-
-# =============================================================================
 # FONCTIONS PRINCIPALES
 # =============================================================================
 
@@ -1380,18 +1315,21 @@ def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
              progress_callback(100, 100)
 
 
-def spy_my_clan(clan_tag: str = "#2R2YVCLJQ"):
-    """
-    Espionner son propre clan :
-      - Sauvegarde la liste complète des membres
-      - Sauvegarde les stats de la dernière guerre
-    """
-    with Timer(f"spy_my_clan {clan_tag}"):
-        data = get_all_clan_members_threadpool([clan_tag], API_TOKEN, condition=False)
-        save_players_to_excel(data, FILE_EPF_PLAYERS)
+def spy_my_clan(clan_tag: str = "#2R2YVCLJQ", **kwargs):
+    """Surveille un clan : historique horodaté des membres, guerres et LDC.
 
-        war = get_last_clan_war_info(clan_tag, API_TOKEN)
-        save_clan_war_to_excel(war, FILE_GDC, clan_tag)
+    Contrairement à l'ancienne version — qui écrasait la photo précédente à
+    chaque appel — chaque exécution **empile** un relevé : une ligne par joueur
+    et par date, dans un classeur Excel propre au clan
+    (``Surveillance/<TAG>.xlsx``).
+
+    L'implémentation vit dans :mod:`coc_bot.core.surveillance` ; l'import reste
+    local pour ne pas charger pandas/openpyxl à ceux qui n'importent coc_api
+    que pour scanner."""
+    from . import surveillance
+
+    with Timer(f"spy_my_clan {clan_tag}"):
+        return surveillance.surveiller_clan(clan_tag, **kwargs)
 
 
 # =============================================================================
