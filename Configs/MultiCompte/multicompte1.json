@@ -3,15 +3,33 @@
     "entries": [
         {
             "name": "ptitlulu",
-            "switch_file": "switch/switchtilu.json",
+            "switch_file": "switch/switchptitlulu.json",
+            "base_enabled": false,
+            "base_config": "config_retirer_obstacles.json",
             "army_file": "armee/selectfirstarmy.json",
             "attack_file": "attaque/attaquenorlalefulldragon.json",
-            "nb_attacks": 2,
+            "nb_attacks": 25,
             "ritual": "upgrades",
-            "ritual_every": 1,
+            "ritual_every": 20,
             "upgrades_config": "configamelioration_classique_hdv18_noremparts.json",
             "research_enabled": true,
-            "research_every": 1,
+            "research_every": 50,
+            "research_config": "config_labo_classique.json",
+            "after_attack_file": "aprèschaqueattaquecarte+demande.json"
+        },
+        {
+            "name": "tilu",
+            "switch_file": "switch/switchtilu.json",
+            "base_enabled": false,
+            "base_config": "",
+            "army_file": "armee/selectfirstarmy.json",
+            "attack_file": "attaque/attaquenorlalefulldragon.json",
+            "nb_attacks": 30,
+            "ritual": "upgrades",
+            "ritual_every": 10,
+            "upgrades_config": "configamelioration_classique_hdv18_noremparts.json",
+            "research_enabled": true,
+            "research_every": 50,
             "research_config": "config_labo_classique.json",
             "after_attack_file": "aprèschaqueattaquecarte+demande.json"
         }
