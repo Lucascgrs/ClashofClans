@@ -116,6 +116,7 @@ exécutions sont affichées sous le bouton.
 | Feuille | Contenu |
 |---|---|
 | `Membres` | 1 ligne par joueur **et par date d'appel** |
+| `Clan` | 1 ligne par date d'appel — grade de ligue de guerre, effectif, palmarès |
 | `Guerres` | 1 ligne par joueur **et par guerre** (classiques et Ligue des clans) |
 | `JournalClan` | 1 ligne par guerre — historique au niveau clan (`/warlog`) |
 | `TagsLDC` | war tags de Ligue des clans archivés |
@@ -123,6 +124,32 @@ exécutions sont affichées sous le bouton.
 
 Chaque feuille est dédouplonnée sur sa propre clé : relancer la surveillance
 dix fois dans la journée n'ajoute que les nouveautés.
+
+### Rapport graphique
+
+Le bouton **📊 Générer les graphiques** produit
+`Surveillance/<TAG>_rapport.html` : un fichier **autonome** (CSS et JavaScript
+inclus, aucune ressource réseau) qui s'ouvre dans le navigateur.
+
+- **Bilan cumulé des guerres** — victoires / défaites / nuls cumulés dans le
+  temps, guerres classiques et LDC confondues, avec un repère ▲ / ▼ à chaque
+  montée ou descente de grade de ligue de guerre.
+- **Destruction moyenne par joueur** — une ligne par joueur, une guerre par pas
+  sur l'axe X, avec cases à cocher (« Tous » / « Aucun ») pour choisir qui
+  afficher. Huit joueurs au maximum reçoivent une couleur ; au-delà les lignes
+  passent en gris — aucune palette ne reste distinguable plus loin.
+- **Effectif** et **niveau d'HDV moyen** du clan dans le temps.
+- **Trois tableaux colorés** : synthèse par joueur (assiduité aux attaques,
+  étoiles moyennes par guerre, % de destruction, date de première détection),
+  détail par joueur et par guerre, et dons par joueur et par mois.
+
+Chaque graphique a sa **vue tableau** dépliable, et le rapport suit le thème
+clair ou sombre du système (bouton *Thème* pour forcer l'un ou l'autre).
+
+> Les compteurs de dons étant remis à zéro chaque saison, le total mensuel est
+> approché par le **maximum relevé dans le mois** : surveillez au moins deux
+> fois par mois, idéalement peu avant la fin de saison. Un ⚠ signale les mois
+> où un seul relevé a été fait.
 
 #### Ce que l'API permet — et ne permet pas
 
@@ -192,6 +219,7 @@ ClashOfClans/
     ├── core/             # logique métier (indépendante de l'UI)
     │   ├── coc_api.py        # API Clash of Clans : scans, filtres, invitations, exports
     │   ├── surveillance.py   # historique horodaté d'un clan (membres, guerres, LDC)
+    │   ├── reporting.py      # rapport HTML interactif autonome (+ report_template.html)
     │   ├── token_manager.py  # génération/rafraîchissement du token API Supercell
     │   ├── env_setup.py      # configuration interactive du .env (CustomTkinter)
     │   ├── playback.py       # LecteurPosition — rejeu de macros + DPI awareness

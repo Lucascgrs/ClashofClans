@@ -11,6 +11,10 @@ accounts_config.json
 coords_config.json
 *_token.json
 
+# Données de surveillance (classeurs par clan + rapports HTML générés) :
+# données personnelles de joueurs, jamais versionnées.
+Surveillance/
+
 # Artefacts Python / build / venv
 __pycache__/
 *.pyc

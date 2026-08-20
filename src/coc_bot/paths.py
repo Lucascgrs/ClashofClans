@@ -71,6 +71,12 @@ def surveillance_path(clan_tag: str) -> str:
     return str(SURVEILLANCE_DIR / f"{slug}.xlsx")
 
 
+def surveillance_report_path(clan_tag: str) -> str:
+    """Chemin du rapport HTML interactif d'un clan (à côté de son classeur)."""
+    slug = "".join(c for c in clan_tag.upper() if c.isalnum())
+    return str(SURVEILLANCE_DIR / f"{slug}_rapport.html")
+
+
 def ensure_dirs() -> None:
     """Crée l'arborescence de dossiers attendue si elle n'existe pas encore."""
     for d in (

@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+/* ==========================================================================
+   Palette validée (dataviz) — les valeurs claires et sombres sont deux jeux
+   choisis pour leur surface respective, jamais une inversion automatique.
+   ========================================================================== */
+:root {
+  color-scheme: light;
+  --page:            #f9f9f7;
+  --surface:         #fcfcfb;
+  --text-primary:    #0b0b0b;
+  --text-secondary:  #52514e;
+  --muted:           #898781;
+  --grid:            #e1e0d9;
+  --axis:            #c3c2b7;
+  --border:          rgba(11, 11, 11, 0.10);
+
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #4a3aa7; --series-8: #e34948;
+
+  --good:     #0ca30c;
+  --warning:  #fab219;
+  --serious:  #ec835a;
+  --critical: #d03b3b;
+
+  --wash-good:     rgba(12, 163, 12, 0.14);
+  --wash-warning:  rgba(250, 178, 25, 0.20);
+  --wash-serious:  rgba(236, 131, 90, 0.20);
+  --wash-critical: rgba(208, 59, 59, 0.16);
+  --wash-none:     transparent;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page:           #0d0d0d;
+    --surface:        #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted:          #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --wash-good:     rgba(12, 163, 12, 0.22);
+    --wash-warning:  rgba(250, 178, 25, 0.22);
+    --wash-serious:  rgba(236, 131, 90, 0.22);
+    --wash-critical: rgba(208, 59, 59, 0.26);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:           #0d0d0d;
+  --surface:        #1a1a19;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --muted:          #898781;
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --border:         rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+  --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+  --wash-good:     rgba(12, 163, 12, 0.22);
+  --wash-warning:  rgba(250, 178, 25, 0.22);
+  --wash-serious:  rgba(236, 131, 90, 0.22);
+  --wash-critical: rgba(208, 59, 59, 0.26);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 0 0 64px;
+  background: var(--page);
+  color: var(--text-primary);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+
+/* --- En-tête ------------------------------------------------------------ */
+header { padding: 32px 0 8px; }
+h1 { font-size: 28px; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
+.sub { color: var(--text-secondary); font-size: 14px; margin: 0; }
+.theme-toggle {
+  position: absolute; top: 24px; right: 24px;
+  background: var(--surface); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--text-primary); }
+
+/* --- Tuiles de synthèse ------------------------------------------------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 24px 0 8px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+.tile .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.tile .value { font-size: 26px; font-weight: 650; line-height: 1.1; }
+.tile .value small { font-size: 14px; font-weight: 450; color: var(--text-secondary); }
+
+/* --- Cartes de graphique ------------------------------------------------ */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px 18px; margin: 20px 0; }
+.card h2 { font-size: 17px; font-weight: 620; margin: 0 0 2px; }
+.card .hint { font-size: 13px; color: var(--text-secondary); margin: 0 0 16px; }
+.plot { position: relative; width: 100%; }
+.plot svg { display: block; width: 100%; overflow: visible; }
+
+/* --- Légende ------------------------------------------------------------ */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-size: 13px; color: var(--text-secondary); }
+.legend .item { display: inline-flex; align-items: center; gap: 7px; }
+.legend .key { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.legend .key.dash { background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px); }
+.legend .glyph { font-size: 12px; flex: none; }
+
+/* --- Infobulle ---------------------------------------------------------- */
+.tip {
+  position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 11px; font-size: 12.5px; line-height: 1.5; white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,.16); z-index: 10; color: var(--text-primary);
+}
+.tip .row { display: flex; align-items: center; gap: 7px; }
+.tip .sw { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.tip .head { font-weight: 620; margin-bottom: 3px; }
+
+/* --- Sélecteur de joueurs ----------------------------------------------- */
+.picker { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+.picker-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.picker-bar button {
+  background: var(--surface); color: var(--text-secondary); border: 1px solid var(--border);
+  border-radius: 7px; padding: 5px 11px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.picker-bar button:hover { color: var(--text-primary); }
+.picker-bar .note { font-size: 12.5px; color: var(--muted); margin-left: auto; }
+.picker-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 2px 14px; max-height: 232px; overflow-y: auto; padding-right: 6px;
+}
+.picker-list label {
+  display: flex; align-items: center; gap: 8px; font-size: 13.5px;
+  padding: 4px 6px; border-radius: 6px; cursor: pointer; min-height: 30px;
+}
+.picker-list label:hover { background: var(--page); }
+.picker-list .sw { width: 11px; height: 11px; border-radius: 50%; flex: none; background: var(--grid); }
+.picker-list .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-list .ct { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* --- Tableaux ----------------------------------------------------------- */
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 560; font-size: 12.5px; text-align: right; position: sticky; top: 0; background: var(--surface); }
+th:first-child, td:first-child { text-align: left; }
+td { font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: var(--page); }
+.grp { border-left: 1px solid var(--border); }
+.cell-good     { background: var(--wash-good); }
+.cell-warning  { background: var(--wash-warning); }
+.cell-serious  { background: var(--wash-serious); }
+.cell-critical { background: var(--wash-critical); }
+.tag { color: var(--muted); font-size: 12px; }
+.new { color: var(--good); font-weight: 600; }
+.out { color: var(--muted); font-style: italic; }
+details { margin-top: 14px; }
+details summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 4px 0; }
+details summary:hover { color: var(--text-primary); }
+details .scroll { margin-top: 10px; max-height: 420px; overflow-y: auto; }
+.matrix td, .matrix th { padding: 5px 7px; font-size: 12.5px; }
+.matrix .pname { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+.empty { color: var(--muted); font-size: 14px; padding: 22px 0; }
+.footnote { font-size: 12.5px; color: var(--muted); margin-top: 12px; }
+.legend-status { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 12.5px; color: var(--text-secondary); margin-top: 12px; }
+.legend-status span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-status i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" id="theme-toggle" type="button">Thème</button>
+<div class="wrap">
+  <header>
+    <h1 id="clan-name"></h1>
+    <p class="sub" id="clan-sub"></p>
+  </header>
+  <section class="tiles" id="tiles"></section>
+  <div id="content"></div>
+</div>
+
+<script>
+const DATA = /*__PAYLOAD__*/null;
+
+/* ===========================================================================
+   Utilitaires
+   =========================================================================== */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const nf = (v, d) => v == null ? "—" : Number(v).toLocaleString("fr-FR", { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 });
+const SERIES = i => `var(--series-${(i % 8) + 1})`;
+const dateFR = ts => new Date(ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "2-digit" });
+
+/* Couleur d'une performance sur UNE guerre (tableau détaillé).
+   L'insuffisance d'attaques prime : ne pas attaquer est pire que mal attaquer. */
+function warClass(attacks, expected, stars, maxStars) {
+  if (!expected) return "";
+  if (attacks <= 0) return "critical";
+  if (attacks < expected) return "serious";
+  if (stars >= maxStars) return "good";
+  if (stars >= maxStars - 1) return "warning";
+  return "critical";
+}
+
+/* Couleur d'un TAUX d'assiduité cumulé (attaques faites sur attaques dues).
+   Appliquer l'égalité stricte à un cumul n'aurait aucun sens : sur quarante
+   guerres, personne ne totalise 100 % — mais on doit en rester très proche. */
+function rateClass(done, due) {
+  if (!due) return "";
+  const r = done / due;
+  if (r >= 0.95) return "good";
+  if (r >= 0.85) return "warning";
+  if (r >= 0.70) return "serious";
+  return "critical";
+}
+
+/* Couleur d'une MOYENNE d'étoiles par guerre. Généralisation directe de la
+   règle par guerre (6/6 vert, 5/6 orange, 4/6 ou moins rouge) : on mesure
+   l'écart au maximum, ce qui vaut aussi bien pour la LDC (maximum 3). */
+function starAvgClass(avg, max) {
+  if (!max) return "";
+  if (avg >= max - 0.5) return "good";
+  if (avg >= max - 1.5) return "warning";
+  if (avg >= max - 2.5) return "serious";
+  return "critical";
+}
+
+/* ===========================================================================
+   Moteur de graphique en lignes (SVG, sans dépendance)
+   =========================================================================== */
+function lineChart(host, cfg) {
+  const plot = el("div", "plot");
+  const tip = el("div", "tip");
+  host.appendChild(plot);
+  plot.appendChild(tip);
+
+  const state = { cfg };
+  const render = () => {
+    const c = state.cfg;
+    const W = Math.max(plot.clientWidth || host.clientWidth || 720, 320);
+    const markerBand = (c.markers && c.markers.length) ? 26 : 0;
+    const PAD = { l: 54, r: 22, t: 12 + markerBand, b: 42 };
+    const H = (c.height || 300) + PAD.t + PAD.b;
+    const iw = W - PAD.l - PAD.r, ih = H - PAD.t - PAD.b;
+
+    // --- Domaines ------------------------------------------------------
+    let xs = [];
+    if (c.xType === "time") {
+      c.series.forEach(s => s.points.forEach(p => { if (p) xs.push(p.x); }));
+      (c.markers || []).forEach(m => xs.push(m.x));
+    } else {
+      xs = c.xLabels.map((_, i) => i);
+    }
+    if (!xs.length) { plot.innerHTML = '<p class="empty">Pas encore de données.</p>'; return; }
+    let x0 = Math.min(...xs), x1 = Math.max(...xs);
+    if (x0 === x1) { x0 -= 1; x1 += 1; }
+
+    let ymax = c.yMax != null ? c.yMax : 0, ymin = c.yMin != null ? c.yMin : 0;
+    if (c.yMax == null && c.yAuto) {
+      // Cadrage serré : une série qui varie de 10 à 11 sur un axe partant de
+      // zéro donne une ligne plate inexploitable. On encadre les valeurs.
+      let lo = Infinity, hi = -Infinity;
+      c.series.forEach(s => s.points.forEach(p => {
+        if (p && p.y != null) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); }
+      }));
+      if (!isFinite(lo)) { lo = 0; hi = 1; }
+      const span = (hi - lo) || Math.max(1, Math.abs(hi) * 0.1);
+      ymin = lo - span * 0.25;
+      ymax = hi + span * 0.25;
+      if (c.yFloor != null) ymin = Math.max(ymin, c.yFloor);
+    } else if (c.yMax == null) {
+      c.series.forEach(s => s.points.forEach(p => { if (p && p.y != null) ymax = Math.max(ymax, p.y); }));
+      ymax = ymax <= 0 ? 1 : ymax * 1.08;
+    }
+    const X = v => PAD.l + (v - x0) / (x1 - x0) * iw;
+    const Y = v => PAD.t + ih - (v - ymin) / (ymax - ymin) * ih;
+
+    // --- Graduations ---------------------------------------------------
+    const niceStep = (range, count) => {
+      const raw = range / count, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || mag * 10;
+      return c.yInteger ? Math.max(1, Math.round(step)) : step;
+    };
+    const ystep = niceStep(ymax - ymin, 5);
+    const yticks = [];
+    for (let v = Math.ceil(ymin / ystep) * ystep; v <= ymax; v += ystep) yticks.push(v);
+
+    let xticks;
+    if (c.xType === "time") {
+      const n = Math.max(2, Math.min(7, Math.floor(iw / 95)));
+      xticks = Array.from({ length: n }, (_, i) => {
+        const v = x0 + (x1 - x0) * i / (n - 1);
+        return { v, label: dateFR(v) };
+      });
+    } else {
+      const last = c.xLabels.length - 1;
+      const stride = Math.max(1, Math.ceil(c.xLabels.length / Math.max(2, Math.floor(iw / 108))));
+      xticks = [];
+      for (let i = 0; i <= last; i += stride) xticks.push({ v: i, label: c.xLabels[i] });
+      // La dernière guerre mérite son étiquette, mais l'ajouter aveuglément la
+      // ferait chevaucher la précédente : on la substitue quand elle est trop
+      // proche au lieu de l'empiler.
+      const tail = xticks[xticks.length - 1];
+      if (tail && tail.v !== last) {
+        if (last - tail.v < stride * 0.7) xticks[xticks.length - 1] = { v: last, label: c.xLabels[last] };
+        else xticks.push({ v: last, label: c.xLabels[last] });
+      }
+    }
+
+    // --- Tracé ---------------------------------------------------------
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.aria || c.title || "graphique")}">`;
+    yticks.forEach(v => {
+      svg += `<line x1="${PAD.l}" y1="${Y(v).toFixed(1)}" x2="${W - PAD.r}" y2="${Y(v).toFixed(1)}" stroke="var(--grid)" stroke-width="1"/>`;
+      svg += `<text x="${PAD.l - 10}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11.5" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${esc(c.yFormat ? c.yFormat(v) : nf(v))}</text>`;
+    });
+    svg += `<line x1="${PAD.l}" y1="${PAD.t + ih}" x2="${W - PAD.r}" y2="${PAD.t + ih}" stroke="var(--axis)" stroke-width="1"/>`;
+    xticks.forEach(t => {
+      svg += `<text x="${X(t.v).toFixed(1)}" y="${PAD.t + ih + 20}" text-anchor="middle" font-size="11.5" fill="var(--muted)">${esc(t.label)}</text>`;
+    });
+    if (c.yLabel) {
+      svg += `<text x="${PAD.l}" y="${PAD.t - 6 - markerBand + 12}" text-anchor="start" font-size="11.5" fill="var(--muted)">${esc(c.yLabel)}</text>`;
+    }
+
+    // Repères verticaux (changements de grade de ligue) : trait + glyphe.
+    // La direction est portée par la forme (▲/▼) autant que par la couleur.
+    (c.markers || []).forEach(m => {
+      const mx = X(m.x).toFixed(1);
+      const col = m.direction === "up" ? "var(--good)" : "var(--critical)";
+      svg += `<line x1="${mx}" y1="${PAD.t}" x2="${mx}" y2="${PAD.t + ih}" stroke="${col}" stroke-width="1" opacity="0.45"/>`;
+      svg += `<text x="${mx}" y="${PAD.t - 9}" text-anchor="middle" font-size="12" fill="${col}">${m.direction === "up" ? "▲" : "▼"}</text>`;
+    });
+
+    // Séries : lignes 2px, ruptures sur valeurs manquantes.
+    c.series.forEach(s => {
+      let d = "", pen = false;
+      s.points.forEach(p => {
+        if (!p || p.y == null) { pen = false; return; }
+        d += (pen ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.y).toFixed(1) + " ";
+        pen = true;
+      });
+      if (!d) return;
+      svg += `<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="${s.width || 2}" stroke-linejoin="round" stroke-linecap="round"${s.dashed ? ' stroke-dasharray="6 5"' : ""} opacity="${s.faded ? 0.35 : 1}"/>`;
+      // Point terminal : rayon >= 4 avec anneau de surface 2px.
+      const last = [...s.points].reverse().find(p => p && p.y != null);
+      if (last && !s.faded) {
+        svg += `<circle cx="${X(last.x).toFixed(1)}" cy="${Y(last.y).toFixed(1)}" r="4.5" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`;
+      }
+    });
+    svg += `<rect id="hit" x="${PAD.l}" y="${PAD.t}" width="${iw}" height="${ih}" fill="transparent"/>`;
+    svg += "</svg>";
+    plot.innerHTML = svg;
+    plot.appendChild(tip);
+
+    // --- Survol : viseur + infobulle -----------------------------------
+    const svgNode = plot.querySelector("svg");
+    const NS = "http://www.w3.org/2000/svg";
+    const cross = document.createElementNS(NS, "line");
+    cross.setAttribute("stroke", "var(--axis)");
+    cross.setAttribute("stroke-width", "1");
+    cross.setAttribute("opacity", "0");
+    svgNode.appendChild(cross);
+
+    const positions = c.xType === "time"
+      ? [...new Set(xs)].sort((a, b) => a - b)
+      : c.xLabels.map((_, i) => i);
+
+    const onMove = (ev) => {
+      const box = svgNode.getBoundingClientRect();
+      const scale = W / box.width;
+      const px = (ev.clientX - box.left) * scale;
+      if (px < PAD.l - 8 || px > W - PAD.r + 8) return onLeave();
+      const xv = x0 + (px - PAD.l) / iw * (x1 - x0);
+      let best = positions[0];
+      for (const p of positions) if (Math.abs(p - xv) < Math.abs(best - xv)) best = p;
+
+      const rows = [];
+      c.series.forEach(s => {
+        const pt = s.points.find(p => p && p.x === best && p.y != null);
+        if (pt) rows.push(`<div class="row"><span class="sw" style="background:${s.color}"></span>${esc(s.label)} : <strong>${esc(c.tipFormat ? c.tipFormat(pt.y) : nf(pt.y))}</strong></div>`);
+      });
+      const marker = (c.markers || []).find(m => Math.abs(X(m.x) - X(best)) < 14);
+      if (marker) rows.push(`<div class="row">${marker.direction === "up" ? "▲" : "▼"} ${esc(marker.label)}</div>`);
+      if (!rows.length) return onLeave();
+
+      const head = c.xType === "time" ? dateFR(best) : (c.xLabels[best] || "");
+      tip.innerHTML = `<div class="head">${esc(head)}</div>${rows.join("")}`;
+      tip.style.opacity = "1";
+      const left = X(best) / scale;
+      tip.style.left = Math.min(Math.max(left + 14, 4), box.width - tip.offsetWidth - 4) + "px";
+      tip.style.top = Math.max(PAD.t / scale, 4) + "px";
+      cross.setAttribute("x1", X(best)); cross.setAttribute("x2", X(best));
+      cross.setAttribute("y1", PAD.t); cross.setAttribute("y2", PAD.t + ih);
+      cross.setAttribute("opacity", "1");
+    };
+    const onLeave = () => { tip.style.opacity = "0"; cross.setAttribute("opacity", "0"); };
+    svgNode.addEventListener("mousemove", onMove);
+    svgNode.addEventListener("mouseleave", onLeave);
+  };
+
+  render();
+  let raf;
+  window.addEventListener("resize", () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); });
+  return { render, update: (cfg) => { state.cfg = cfg; render(); } };
+}
+
+function legend(host, items) {
+  const box = el("div", "legend");
+  items.forEach(it => {
+    const item = el("span", "item");
+    if (it.glyph) {
+      const g = el("span", "glyph", it.glyph);
+      g.style.color = it.color;
+      item.appendChild(g);
+    } else {
+      const k = el("span", "key" + (it.dashed ? " dash" : ""));
+      if (it.dashed) { k.style.color = it.color; } else { k.style.background = it.color; }
+      item.appendChild(k);
+    }
+    item.appendChild(el("span", null, it.label));
+    box.appendChild(item);
+  });
+  host.appendChild(box);
+  return box;
+}
+
+function tableView(host, summary, head, rows) {
+  const d = el("details");
+  d.appendChild(el("summary", null, summary));
+  const sc = el("div", "scroll");
+  let h = "<table><thead><tr>" + head.map(x => `<th>${esc(x)}</th>`).join("") + "</tr></thead><tbody>";
+  rows.forEach(r => { h += "<tr>" + r.map(x => `<td>${x == null ? "—" : esc(x)}</td>`).join("") + "</tr>"; });
+  sc.innerHTML = h + "</tbody></table>";
+  d.appendChild(sc);
+  host.appendChild(d);
+}
+
+function card(title, hint) {
+  const c = el("section", "card");
+  c.appendChild(el("h2", null, title));
+  if (hint) c.appendChild(el("p", "hint", hint));
+  $("#content").appendChild(c);
+  return c;
+}
+
+/* ===========================================================================
+   En-tête & tuiles
+   =========================================================================== */
+function renderHeader() {
+  const o = DATA.overview;
+  $("#clan-name").textContent = o.clan_name;
+  $("#clan-sub").textContent =
+    `${o.clan_tag} · période ${o.period} · rapport généré le ${o.generated}`;
+
+  const tiles = [
+    ["Guerres suivies", nf(o.wars), ""],
+    ["Taux de victoire", o.win_rate == null ? "—" : nf(o.win_rate, 1) + " %",
+      `${o.wins}V / ${o.losses}D / ${o.ties}N`],
+    ["Membres", nf(o.members), ""],
+    ["Ligue de guerre", o.war_league || "—", ""],
+    ["Joueurs suivis", nf(DATA.players.length), ""],
+  ];
+  const host = $("#tiles");
+  tiles.forEach(([label, value, sub]) => {
+    const t = el("div", "tile");
+    t.appendChild(el("div", "label", label));
+    const v = el("div", "value", value);
+    if (sub) { const s = el("small", null, "  " + sub); v.appendChild(s); }
+    t.appendChild(v);
+    host.appendChild(t);
+  });
+}
+
+/* ===========================================================================
+   1. Bilan cumulé des guerres + changements de grade
+   =========================================================================== */
+function renderCumulative() {
+  const pts = DATA.cumulative.points;
+  const changes = DATA.leagueChanges;
+  const c = card("Bilan cumulé des guerres",
+    "Victoires, défaites et nuls cumulés dans le temps — guerres classiques et Ligue des clans confondues. "
+    + "Les repères ▲ / ▼ marquent un changement de grade de ligue de guerre.");
+
+  if (!pts.length) {
+    c.appendChild(el("p", "empty", "Aucune guerre terminée dans le classeur pour l'instant."));
+    return;
+  }
+
+  const mk = (key, label, color) => ({
+    label, color, points: pts.map(p => ({ x: p.ts, y: p[key] })),
+  });
+  const series = [
+    mk("w", "Victoires", "var(--good)"),
+    mk("l", "Défaites", "var(--critical)"),
+    mk("t", "Nuls", "var(--text-secondary)"),
+  ];
+  const markers = changes.map(ch => ({
+    x: ch.ts, direction: ch.direction,
+    label: `${ch.direction === "up" ? "Montée" : "Descente"} : ${ch.from || "?"} → ${ch.to || "?"}`,
+  }));
+
+  lineChart(c, {
+    series, markers, xType: "time", height: 300,
+    yLabel: "Nombre de guerres (cumulé)", title: "Bilan cumulé des guerres",
+    tipFormat: v => nf(v),
+  });
+  legend(c, [
+    { label: "Victoires", color: "var(--good)" },
+    { label: "Défaites", color: "var(--critical)" },
+    { label: "Nuls", color: "var(--text-secondary)" },
+    { label: "Montée de grade", color: "var(--good)", glyph: "▲" },
+    { label: "Descente de grade", color: "var(--critical)", glyph: "▼" },
+  ]);
+
+  if (!changes.length) {
+    c.appendChild(el("p", "footnote",
+      "Aucun changement de grade détecté : le grade de ligue de guerre n'est relevé que "
+      + "depuis les surveillances récentes, et il ne bouge qu'en fin de saison de LDC."));
+  }
+
+  tableView(c, "Voir les données",
+    ["Date", "Type", "Adversaire", "Résultat", "Victoires", "Défaites", "Nuls"],
+    pts.map(p => [p.date, p.type === "ldc" ? "LDC" : "GDC", p.opponent || "—",
+      { win: "Victoire", lose: "Défaite", tie: "Nul" }[p.result] || p.result,
+      p.w, p.l, p.t]));
+
+  if (changes.length) {
+    tableView(c, "Voir les changements de grade",
+      ["Date", "Sens", "De", "Vers"],
+      changes.map(ch => [ch.date, ch.direction === "up" ? "▲ Montée" : "▼ Descente",
+        ch.from || "—", ch.to || "—"]));
+  }
+}
+
+/* ===========================================================================
+   2. Destruction moyenne par joueur (sélection interactive)
+   =========================================================================== */
+function renderPlayers() {
+  const wars = DATA.wars;
+  const c = card("Destruction moyenne par joueur",
+    "Une ligne par joueur : pourcentage moyen de destruction infligé à chaque guerre. "
+    + "Une rupture de ligne signifie que le joueur n'a pas participé.");
+
+  const eligible = DATA.players.filter(p => p.wars > 0);
+  if (!wars.length || !eligible.length) {
+    c.appendChild(el("p", "empty", "Aucune guerre avec détail joueur pour l'instant."));
+    return;
+  }
+
+  const labels = wars.map(w => w.label);
+  const selected = new Set();
+  const slots = new Map();          // tag -> créneau de couleur (stable)
+  const pool = [0, 1, 2, 3, 4, 5, 6, 7];
+
+  // Le créneau est pris à la sélection et rendu à la désélection : décocher un
+  // joueur ne repeint jamais ceux qui restent affichés.
+  const take = (tag) => { if (!slots.has(tag) && pool.length) slots.set(tag, pool.shift()); selected.add(tag); };
+  const give = (tag) => {
+    selected.delete(tag);
+    if (slots.has(tag)) { pool.push(slots.get(tag)); pool.sort((a, b) => a - b); slots.delete(tag); }
+  };
+
+  eligible.slice(0, DATA.defaultSelected).forEach(p => take(p.tag));
+
+  const chartHost = el("div");
+  c.appendChild(chartHost);
+  const legendHost = el("div");
+  c.appendChild(legendHost);
+
+  const picker = el("div", "picker");
+  const bar = el("div", "picker-bar");
+  const btnAll = el("button", null, "Tous");
+  const btnNone = el("button", null, "Aucun");
+  const note = el("span", "note");
+  bar.append(btnAll, btnNone, note);
+  picker.appendChild(bar);
+  const list = el("div", "picker-list");
+  picker.appendChild(list);
+  c.appendChild(picker);
+
+  const boxes = new Map();
+  eligible.forEach(p => {
+    const lab = el("label");
+    const cb = el("input");
+    cb.type = "checkbox";
+    cb.checked = selected.has(p.tag);
+    cb.addEventListener("change", () => { cb.checked ? take(p.tag) : give(p.tag); draw(); });
+    const sw = el("span", "sw");
+    const nm = el("span", "nm", p.name || p.tag);
+    const ct = el("span", "ct", p.wars + "g");
+    lab.append(cb, sw, nm, ct);
+    lab.title = `${p.name} (${p.tag}) — ${p.wars} guerres`;
+    list.appendChild(lab);
+    boxes.set(p.tag, { cb, sw });
+  });
+
+  let chart = null;
+  function draw() {
+    const chosen = eligible.filter(p => selected.has(p.tag));
+    const colored = chosen.filter(p => slots.has(p.tag));
+    const extra = chosen.filter(p => !slots.has(p.tag));
+
+    const series = [];
+    // Les joueurs au-delà de 8 passent en gris et sont regroupés sous
+    // « Autres » : au-delà, aucune palette ne reste distinguable.
+    extra.forEach(p => series.push({
+      label: p.name || p.tag, color: "var(--muted)", faded: true,
+      points: DATA.series.series[p.tag].map((y, i) => ({ x: i, y })),
+    }));
+    colored.forEach(p => series.push({
+      label: p.name || p.tag, color: SERIES(slots.get(p.tag)),
+      points: DATA.series.series[p.tag].map((y, i) => ({ x: i, y })),
+    }));
+    series.push({
+      label: "Moyenne du clan", color: "var(--text-secondary)", dashed: true,
+      points: DATA.series.average.map((y, i) => ({ x: i, y })),
+    });
+
+    const cfg = {
+      series, xType: "index", xLabels: labels, height: 320, yMax: 105, yMin: 0,
+      yLabel: "% de destruction", title: "Destruction moyenne par joueur",
+      yFormat: v => nf(v) + " %", tipFormat: v => nf(v, 1) + " %",
+    };
+    chart ? chart.update(cfg) : (chart = lineChart(chartHost, cfg));
+
+    legendHost.innerHTML = "";
+    const items = colored.map(p => ({ label: p.name || p.tag, color: SERIES(slots.get(p.tag)) }));
+    if (extra.length) items.push({ label: `Autres (${extra.length})`, color: "var(--muted)" });
+    items.push({ label: "Moyenne du clan", color: "var(--text-secondary)", dashed: true });
+    legend(legendHost, items);
+
+    boxes.forEach(({ cb, sw }, tag) => {
+      cb.checked = selected.has(tag);
+      sw.style.background = slots.has(tag) ? SERIES(slots.get(tag))
+        : (selected.has(tag) ? "var(--muted)" : "var(--grid)");
+    });
+    note.textContent = `${chosen.length} / ${eligible.length} joueurs affichés`
+      + (extra.length ? ` · ${extra.length} en gris (8 couleurs maximum)` : "");
+  }
+
+  btnAll.addEventListener("click", () => { eligible.forEach(p => take(p.tag)); draw(); });
+  btnNone.addEventListener("click", () => { eligible.forEach(p => give(p.tag)); draw(); });
+  draw();
+
+  tableView(c, "Voir les données",
+    ["Joueur", ...labels],
+    eligible.map(p => [p.name || p.tag,
+      ...DATA.series.series[p.tag].map(v => v == null ? "—" : nf(v, 1) + " %")]));
+}
+
+/* ===========================================================================
+   3. Effectif et niveau d'HDV moyen
+   =========================================================================== */
+function renderRoster() {
+  const pts = DATA.roster.points;
+  if (pts.length < 2) return;
+  const c = card("Effectif et niveau moyen du clan",
+    "Deux mesures d'échelles différentes, donc deux graphiques : superposer un effectif "
+    + "et un niveau d'HDV sur deux axes inventerait une corrélation.");
+
+  lineChart(c, {
+    series: [{ label: "Effectif", color: "var(--series-1)", points: pts.map(p => ({ x: p.ts, y: p.effectif })) }],
+    xType: "time", height: 170, yLabel: "Membres", yAuto: true, yInteger: true, yFloor: 0,
+    title: "Effectif du clan", tipFormat: v => nf(v) + " membres",
+  });
+  lineChart(c, {
+    series: [{ label: "HDV moyen", color: "var(--series-2)", points: pts.map(p => ({ x: p.ts, y: p.hdv })) }],
+    xType: "time", height: 170, yLabel: "Niveau d'HDV moyen", yAuto: true,
+    title: "Niveau d'HDV moyen", yFormat: v => nf(v, 1), tipFormat: v => nf(v, 2),
+  });
+
+  tableView(c, "Voir les données", ["Date", "Effectif", "HDV moyen"],
+    pts.map(p => [p.date, p.effectif, nf(p.hdv, 2)]));
+}
+
+/* ===========================================================================
+   4. Tableau — synthèse par joueur
+   =========================================================================== */
+function statusLegend(host, entries) {
+  const box = el("div", "legend-status");
+  entries.forEach(([cls, label]) => {
+    const s = el("span");
+    const i = el("i");
+    i.style.background = `var(--wash-${cls})`;
+    i.style.border = `1px solid var(--${cls})`;
+    s.append(i, el("span", null, label));
+    box.appendChild(s);
+  });
+  host.appendChild(box);
+}
+
+function renderSummary() {
+  const players = DATA.players;
+  if (!players.length) return;
+  const c = card("Synthèse par joueur",
+    "Attaques réalisées sur attaques dues (2 par guerre classique, 1 par round de LDC) "
+    + "et étoiles obtenues sur étoiles possibles. La couleur suit le résultat ; la valeur reste toujours lisible.");
+
+  const cell = (txt, cls, title) =>
+    `<td class="${cls ? "cell-" + cls : ""}"${title ? ` title="${esc(title)}"` : ""}>${esc(txt)}</td>`;
+
+  // Assiduité en taux, étoiles en moyenne par guerre : rapportées au cumul
+  // brut (« 140 / 228 »), ces deux mesures ne sont pas interprétables.
+  const attackCell = (done, due) => due
+    ? cell(`${done} / ${due}`, rateClass(done, due),
+        `${nf(100 * done / due, 0)} % des attaques dues`)
+    : cell("—");
+  const starCell = (stars, maxStars, wars) => {
+    if (!wars || !maxStars) return cell("—");
+    const avg = stars / wars, max = maxStars / wars;
+    return cell(`${nf(avg, 1)} / ${nf(max, 0)}`, starAvgClass(avg, max),
+      `${stars} étoiles sur ${wars} guerres`);
+  };
+
+  let h = `<table><thead><tr>
+    <th>Joueur</th><th>HDV</th><th>Rôle</th><th>Vu depuis</th>
+    <th class="grp">Guerres</th><th>Attaques GDC</th><th>Étoiles / guerre</th>
+    <th class="grp">Rounds LDC</th><th>Attaques LDC</th><th>Étoiles / round</th>
+    <th class="grp">% destruction</th></tr></thead><tbody>`;
+
+  players.forEach(p => {
+    const name = `${esc(p.name || p.tag)} <span class="tag">${esc(p.tag)}</span>`
+      + (p.in_clan ? "" : ' <span class="out">(parti)</span>');
+    h += "<tr>"
+      + `<td>${name}</td><td>${p.townhall || "—"}</td><td>${esc(p.role || "—")}</td>`
+      + `<td>${esc(p.first_seen || "—")}</td>`
+      + `<td class="grp">${p.gdc_wars}</td>`
+      + attackCell(p.gdc_attacks, p.gdc_expected)
+      + starCell(p.gdc_stars, p.gdc_max_stars, p.gdc_wars)
+      + `<td class="grp">${p.ldc_wars}</td>`
+      + attackCell(p.ldc_attacks, p.ldc_expected)
+      + starCell(p.ldc_stars, p.ldc_max_stars, p.ldc_wars)
+      + `<td class="grp">${p.destruction == null ? "—" : nf(p.destruction, 1) + " %"}</td>`
+      + "</tr>";
+  });
+  const sc = el("div", "scroll");
+  sc.innerHTML = h + "</tbody></table>";
+  c.appendChild(sc);
+  statusLegend(c, [["good", "Assidu (≥ 95 %) / étoiles au maximum"],
+    ["warning", "≥ 85 % des attaques / une étoile sous le maximum"],
+    ["serious", "≥ 70 % des attaques / deux étoiles sous le maximum"],
+    ["critical", "Moins de 70 % des attaques, ou plus de deux étoiles sous le maximum"]]);
+  c.appendChild(el("p", "footnote",
+    "Les étoiles sont exprimées en moyenne par guerre (maximum 6 en guerre classique, "
+    + "3 par round de LDC) : un cumul brut sur des dizaines de guerres ne serait pas lisible. "
+    + "« Vu depuis » est la première date à laquelle le joueur apparaît dans les relevés — "
+    + "une date récente signale une recrue, pas forcément un nouveau joueur."));
+}
+
+/* ===========================================================================
+   5. Tableau — détail par guerre
+   =========================================================================== */
+function renderMatrix() {
+  const m = DATA.matrix;
+  if (!m.wars.length) return;
+  const c = card("Détail par joueur et par guerre",
+    `Attaques réalisées / dues et étoiles obtenues, pour les ${m.wars.length} guerres les plus récentes. `
+    + "Survolez une cellule pour le pourcentage de destruction.");
+
+  let h = '<table class="matrix"><thead><tr><th class="pname">Joueur</th>'
+    + m.wars.map(w => `<th title="${esc((w.opponent || "") + " — " + (w.result || ""))}">${esc(w.label)}</th>`).join("")
+    + "</tr></thead><tbody>";
+
+  DATA.players.filter(p => p.wars > 0).forEach(p => {
+    h += `<tr><td class="pname">${esc(p.name || p.tag)}</td>`;
+    m.cells[p.tag].forEach(cellData => {
+      if (!cellData) { h += '<td class="tag">—</td>'; return; }
+      const cls = warClass(cellData.a, cellData.e, cellData.s, cellData.ms);
+      h += `<td class="cell-${cls}" title="${nf(cellData.d, 1)} % de destruction">`
+        + `${cellData.a}/${cellData.e} · ${cellData.s}★</td>`;
+    });
+    h += "</tr>";
+  });
+  const sc = el("div", "scroll");
+  sc.innerHTML = h + "</tbody></table>";
+  c.appendChild(sc);
+  statusLegend(c, [["good", "Attaques faites, étoiles au maximum"],
+    ["warning", "Une étoile sous le maximum"],
+    ["serious", "Attaques incomplètes"],
+    ["critical", "Aucune attaque, ou 2 étoiles ou plus sous le maximum"]]);
+}
+
+/* ===========================================================================
+   6. Tableau — dons par joueur et par mois
+   =========================================================================== */
+function renderDonations() {
+  const d = DATA.donations;
+  if (!d.rows.length) return;
+  const c = card("Dons par joueur et par mois",
+    "Les compteurs de dons sont remis à zéro à chaque saison : le total du mois est approché "
+    + "par le maximum relevé dans le mois.");
+
+  let h = '<table><thead><tr><th>Joueur</th><th class="grp">Moyenne donnés</th><th>Moyenne reçus</th>'
+    + d.months.map(mo => `<th class="grp">${esc(mo)}</th>`).join("") + "</tr></thead><tbody>";
+
+  d.rows.forEach(r => {
+    h += `<tr><td>${esc(r.name || r.tag)}</td>`
+      + `<td class="grp">${nf(r.avg_given)}</td><td>${nf(r.avg_received)}</td>`;
+    d.months.forEach(mo => {
+      const v = r.months[mo];
+      if (!v) { h += '<td class="grp tag">—</td>'; return; }
+      // Un seul relevé dans le mois : le maximum est très probablement
+      // sous-estimé, on le signale plutôt que de le présenter comme un total.
+      const warn = v.n < 2 ? ' title="Un seul relevé ce mois-ci — total probablement sous-estimé"' : ` title="${v.n} relevés"`;
+      h += `<td class="grp"${warn}>${nf(v.d)} / ${nf(v.r)}${v.n < 2 ? " ⚠" : ""}</td>`;
+    });
+    h += "</tr>";
+  });
+  const sc = el("div", "scroll");
+  sc.innerHTML = h + "</tbody></table>";
+  c.appendChild(sc);
+  c.appendChild(el("p", "footnote",
+    "Chaque cellule mensuelle affiche « dons donnés / dons reçus ». Le symbole ⚠ signale un mois "
+    + "où un seul relevé a été effectué : la valeur y est probablement sous-estimée."));
+}
+
+/* ===========================================================================
+   Thème & amorçage
+   =========================================================================== */
+$("#theme-toggle").addEventListener("click", () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const now = document.documentElement.getAttribute("data-theme")
+    || (dark ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", now === "dark" ? "light" : "dark");
+  window.dispatchEvent(new Event("resize"));
+});
+
+renderHeader();
+renderCumulative();
+renderPlayers();
+renderRoster();
+renderSummary();
+renderMatrix();
+renderDonations();
+</script>
+</body>
+</html>

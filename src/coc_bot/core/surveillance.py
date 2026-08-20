@@ -12,6 +12,7 @@ Un classeur Excel par clan : ``Surveillance/<TAG>.xlsx``, avec cinq feuilles.
 
 ===============  ============================================================
 Membres          1 ligne / joueur / date d'appel
+Clan             1 ligne / date d'appel — grade de ligue de guerre, effectif…
 Guerres          1 ligne / joueur / guerre (classiques ET Ligue des clans)
 JournalClan      1 ligne / guerre — historique niveau clan (``/warlog``)
 TagsLDC          war tags de Ligue des clans archivés (voir plus bas)
@@ -58,6 +59,7 @@ from ..paths import SURVEILLANCE_DIR, surveillance_path
 
 # --- Feuilles du classeur -------------------------------------------------
 SHEET_MEMBERS = "Membres"
+SHEET_CLAN = "Clan"
 SHEET_WARS = "Guerres"
 SHEET_WARLOG = "JournalClan"
 SHEET_CWL_TAGS = "TagsLDC"
@@ -69,6 +71,7 @@ SHEET_CALLS = "Appels"
 #: même guerre met la ligne à jour au lieu de la dupliquer).
 _DEDUP_KEYS = {
     SHEET_MEMBERS: ["player_tag", "timestamp"],
+    SHEET_CLAN: ["timestamp"],
     SHEET_WARS: ["war_id", "player_tag"],
     SHEET_WARLOG: ["war_id"],
     SHEET_CWL_TAGS: ["war_tag"],
@@ -161,37 +164,73 @@ def _read_sheet(path: str, sheet: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _append_sheet(path: str, sheet: str, rows: list[dict]) -> int:
-    """Fusionne ``rows`` dans une feuille et retourne le nombre de NOUVELLES lignes.
+#: Ordre des feuilles dans le classeur écrit.
+_SHEET_ORDER = (SHEET_MEMBERS, SHEET_CLAN, SHEET_WARS, SHEET_WARLOG,
+                SHEET_CWL_TAGS, SHEET_CALLS)
 
-    La déduplication utilise ``_DEDUP_KEYS[sheet]`` en gardant la dernière
-    occurrence : une guerre re-requêtée en cours de route voit ses lignes mises
-    à jour (étoiles, % de destruction) au lieu d'être dupliquée."""
-    if not rows:
-        return 0
 
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    new_df = pd.DataFrame(rows)
-    existing = _read_sheet(path, sheet)
-    before = len(existing)
+class Workbook:
+    """Classeur de surveillance chargé en mémoire, écrit **une seule fois**.
 
-    df = (pd.concat([existing, new_df], ignore_index=True)
-          if not existing.empty else new_df)
+    ``pd.ExcelWriter(mode="a")`` relit et réécrit l'intégralité du fichier à
+    chaque feuille touchée. Écrire feuille par feuille faisait donc payer à un
+    seul passage de surveillance une douzaine d'analyses complètes d'un fichier
+    qui ne fait que grossir — plus de cinq secondes dès un millier de lignes, et
+    ça empire indéfiniment. On charge tout une fois, on modifie en mémoire, et
+    :meth:`save` écrit le fichier complet en une passe.
+    """
 
-    keys = [k for k in _DEDUP_KEYS.get(sheet, []) if k in df.columns]
-    if keys:
-        df = df.drop_duplicates(subset=keys, keep=_DEDUP_KEEP.get(sheet, "last"))
-    df = df.reset_index(drop=True)
+    def __init__(self, path: str):
+        self.path = path
+        self.sheets: dict[str, pd.DataFrame] = {}
+        self.dirty = False
+        if os.path.exists(path):
+            # Une lecture en échec ne doit PAS être silencieuse : partir d'un
+            # classeur vide reviendrait à écraser les données existantes.
+            self.sheets = pd.read_excel(path, sheet_name=None)
 
-    if os.path.exists(path):
-        with pd.ExcelWriter(path, engine="openpyxl", mode="a",
-                            if_sheet_exists="replace") as writer:
-            df.to_excel(writer, sheet_name=sheet, index=False)
-    else:
-        with pd.ExcelWriter(path, engine="openpyxl", mode="w") as writer:
-            df.to_excel(writer, sheet_name=sheet, index=False)
+    def get(self, sheet: str) -> pd.DataFrame:
+        """Feuille demandée (DataFrame vide si elle n'existe pas encore)."""
+        return self.sheets.get(sheet, pd.DataFrame())
 
-    return len(df) - before
+    def append(self, sheet: str, rows: list[dict]) -> int:
+        """Fusionne ``rows`` et retourne le nombre de **nouvelles** lignes.
+
+        La déduplication suit ``_DEDUP_KEYS[sheet]`` ; par défaut la dernière
+        occurrence gagne, si bien qu'une guerre re-requêtée en cours de route
+        voit ses lignes mises à jour (étoiles, % de destruction) au lieu d'être
+        dupliquée."""
+        if not rows:
+            return 0
+
+        existing = self.get(sheet)
+        before = len(existing)
+        new_df = pd.DataFrame(rows)
+        df = (pd.concat([existing, new_df], ignore_index=True)
+              if not existing.empty else new_df)
+
+        keys = [k for k in _DEDUP_KEYS.get(sheet, []) if k in df.columns]
+        if keys:
+            df = df.drop_duplicates(subset=keys, keep=_DEDUP_KEEP.get(sheet, "last"))
+
+        self.sheets[sheet] = df.reset_index(drop=True)
+        self.dirty = True
+        return len(self.sheets[sheet]) - before
+
+    def save(self) -> None:
+        """Écrit le classeur complet (sans effet si rien n'a changé)."""
+        if not self.dirty:
+            return
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        # Les feuilles inconnues (ajoutées à la main dans le tableur) sont
+        # relues puis réécrites telles quelles : réécrire tout le fichier ne
+        # doit jamais faire perdre le travail de l'utilisateur.
+        extras = [n for n in self.sheets if n not in _SHEET_ORDER]
+        with pd.ExcelWriter(self.path, engine="openpyxl", mode="w") as writer:
+            for name in list(_SHEET_ORDER) + extras:
+                if name in self.sheets:
+                    self.sheets[name].to_excel(writer, sheet_name=name, index=False)
+        self.dirty = False
 
 
 # =============================================================================
@@ -219,6 +258,33 @@ def _member_rows(clan: dict, clan_tag: str, timestamp: str) -> list[dict]:
         }
         for m in clan.get("memberList", [])
     ]
+
+
+def _clan_row(clan: dict, clan_tag: str, timestamp: str) -> dict:
+    """Relevé horodaté du clan lui-même (une ligne par appel).
+
+    ``war_league_id`` est le nerf du suivi de grade : les identifiants de ligue
+    de guerre sont croissants avec le niveau (48000000 = non classé, puis
+    Bronze III → Champion I). Comparer deux relevés successifs dit donc si le
+    clan est **monté** ou **descendu**, ce que le nom seul ne permet pas
+    (« Maître III » est plus bas que « Maître II »)."""
+    war_league = clan.get("warLeague") or {}
+    return {
+        "timestamp": timestamp,
+        "clan_tag": clan_tag,
+        "clan_name": clan.get("name"),
+        "clan_level": clan.get("clanLevel"),
+        "members": clan.get("members"),
+        "clan_points": clan.get("clanPoints"),
+        "war_league_id": war_league.get("id"),
+        "war_league_name": war_league.get("name"),
+        "war_wins": clan.get("warWins"),
+        "war_losses": clan.get("warLosses"),
+        "war_ties": clan.get("warTies"),
+        "war_win_streak": clan.get("warWinStreak"),
+        "war_frequency": clan.get("warFrequency"),
+        "required_townhall": clan.get("requiredTownhallLevel"),
+    }
 
 
 # =============================================================================
@@ -351,20 +417,27 @@ def _warlog_rows(entries: list[dict], clan_tag: str) -> list[dict]:
 # COLLECTE — UNE ÉTAPE PAR SOURCE DE DONNÉES
 # =============================================================================
 
-def collect_members(clan_tag: str, path: str, timestamp: str,
+def collect_members(clan_tag: str, book: Workbook, timestamp: str,
                     log: Callable = logging.info) -> int:
-    """Relevé horodaté des membres du clan → feuille ``Membres``."""
+    """Relevé horodaté des membres → feuilles ``Membres`` et ``Clan``.
+
+    Les deux feuilles proviennent du **même** appel ``/clans/{tag}`` : le
+    relevé du clan (grade de ligue de guerre, effectif, palmarès) ne coûte
+    aucune requête supplémentaire."""
     clan = _api(f"/clans/{clan_tag.replace('#', '%23')}")
     if not clan:
         log("⚠ Membres : clan introuvable ou API indisponible.")
         return 0
     rows = _member_rows(clan, clan_tag, timestamp)
-    added = _append_sheet(path, SHEET_MEMBERS, rows)
-    log(f"👥 Membres : {len(rows)} relevés ajoutés ({clan.get('name')}).")
+    added = book.append(SHEET_MEMBERS, rows)
+    book.append(SHEET_CLAN, [_clan_row(clan, clan_tag, timestamp)])
+    league = (clan.get("warLeague") or {}).get("name", "—")
+    log(f"👥 Membres : {len(rows)} relevés ajoutés ({clan.get('name')}, "
+        f"ligue de guerre : {league}).")
     return added
 
 
-def collect_current_war(clan_tag: str, path: str,
+def collect_current_war(clan_tag: str, book: Workbook,
                         log: Callable = logging.info) -> int:
     """Guerre classique en cours ou tout juste terminée → feuille ``Guerres``.
 
@@ -380,13 +453,13 @@ def collect_current_war(clan_tag: str, path: str,
         return 0
 
     rows = _war_rows(war, clan_tag, war_type="classique")
-    added = _append_sheet(path, SHEET_WARS, rows)
+    added = book.append(SHEET_WARS, rows)
     log(f"⚔ Guerre classique ({war.get('state')}) : {len(rows)} joueurs, "
         f"{added} nouvelle(s) ligne(s).")
     return added
 
 
-def collect_warlog(clan_tag: str, path: str, limit: int = 50,
+def collect_warlog(clan_tag: str, book: Workbook, limit: int = 50,
                    log: Callable = logging.info) -> int:
     """Historique des guerres au niveau clan → feuille ``JournalClan``.
 
@@ -398,12 +471,12 @@ def collect_warlog(clan_tag: str, path: str, limit: int = 50,
         log("⚠ Journal de guerre : privé ou indisponible (403).")
         return 0
     rows = _warlog_rows(data.get("items", []), clan_tag)
-    added = _append_sheet(path, SHEET_WARLOG, rows)
+    added = book.append(SHEET_WARLOG, rows)
     log(f"📜 Journal de guerre : {len(rows)} guerres lues, {added} nouvelle(s).")
     return added
 
 
-def collect_cwl(clan_tag: str, path: str,
+def collect_cwl(clan_tag: str, book: Workbook,
                 log: Callable = logging.info) -> tuple[int, int]:
     """Ligue des clans : archive les war tags **puis** collecte chaque round.
 
@@ -427,16 +500,16 @@ def collect_cwl(clan_tag: str, path: str,
             if wt and wt != _EMPTY_WAR_TAG:
                 tag_rows.append({"season": season, "round": idx, "war_tag": wt,
                                  "clan_tag": clan_tag, "first_seen": seen})
-    archived = _append_sheet(path, SHEET_CWL_TAGS, tag_rows)
+    archived = book.append(SHEET_CWL_TAGS, tag_rows)
     log(f"🏆 LDC saison {season} ({group.get('state')}) : "
         f"{len(tag_rows)} war tags, {archived} nouveau(x) archivé(s).")
 
     # 2) Collecte du détail joueur de chaque round.
-    added = _fetch_war_tags(clan_tag, path, tag_rows, log=log)
+    added = _fetch_war_tags(clan_tag, book, tag_rows, log=log)
     return added, archived
 
 
-def _fetch_war_tags(clan_tag: str, path: str, tag_rows: list[dict],
+def _fetch_war_tags(clan_tag: str, book: Workbook, tag_rows: list[dict],
                     log: Callable = logging.info) -> int:
     """Requête chaque war tag LDC et empile les lignes joueurs.
 
@@ -458,7 +531,7 @@ def _fetch_war_tags(clan_tag: str, path: str, tag_rows: list[dict],
         rows.extend(_war_rows(war, clan_tag, war_type="ldc",
                               war_tag=wt, season=row.get("season", "")))
 
-    added = _append_sheet(path, SHEET_WARS, rows)
+    added = book.append(SHEET_WARS, rows)
     if added:
         log(f"🏆 LDC : {added} nouvelle(s) ligne(s) joueur ajoutée(s).")
     return added
@@ -472,8 +545,8 @@ def refetch_archived_cwl(clan_tag: str, season: str | None = None,
     répond encore longtemps après la fin d'une saison, ce qui permet de
     rattraper une collecte incomplète. ``season`` limite le rattrapage à une
     saison précise (ex. ``"2026-07"``)."""
-    path = surveillance_path(clan_tag)
-    tags = _read_sheet(path, SHEET_CWL_TAGS)
+    book = Workbook(surveillance_path(clan_tag))
+    tags = book.get(SHEET_CWL_TAGS)
     if tags.empty:
         log("ℹ Aucun war tag LDC archivé pour ce clan.")
         return 0
@@ -485,7 +558,9 @@ def refetch_archived_cwl(clan_tag: str, season: str | None = None,
 
     tag_rows = tags.to_dict("records")
     log(f"🔄 Rattrapage LDC : {len(tag_rows)} war tags à re-requêter…")
-    return _fetch_war_tags(clan_tag, path, tag_rows, log=log)
+    added = _fetch_war_tags(clan_tag, book, tag_rows, log=log)
+    book.save()
+    return added
 
 
 # =============================================================================
@@ -509,15 +584,16 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
     timestamp = _now()
     log(f"🛰 Surveillance de {clan_tag} → {os.path.basename(path)}")
 
+    book = Workbook(path)
     resume = {"timestamp": timestamp, "clan_tag": clan_tag,
               "membres": 0, "guerres": 0, "journal": 0, "war_tags_ldc": 0,
               "erreurs": ""}
     erreurs = []
 
     etapes = [
-        ("membres", membres, lambda: collect_members(clan_tag, path, timestamp, log)),
-        ("guerres", guerre, lambda: collect_current_war(clan_tag, path, log)),
-        ("journal", journal, lambda: collect_warlog(clan_tag, path, log=log)),
+        ("membres", membres, lambda: collect_members(clan_tag, book, timestamp, log)),
+        ("guerres", guerre, lambda: collect_current_war(clan_tag, book, log)),
+        ("journal", journal, lambda: collect_warlog(clan_tag, book, log=log)),
     ]
     for cle, actif, action in etapes:
         if not actif:
@@ -530,7 +606,7 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
 
     if ldc:
         try:
-            lignes, tags = collect_cwl(clan_tag, path, log)
+            lignes, tags = collect_cwl(clan_tag, book, log)
             resume["guerres"] += lignes
             resume["war_tags_ldc"] = tags
         except Exception as e:
@@ -539,8 +615,8 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
 
     resume["erreurs"] = " | ".join(erreurs)
     resume["fichier"] = path
-    _append_sheet(path, SHEET_CALLS, [{k: v for k, v in resume.items()
-                                       if k != "fichier"}])
+    book.append(SHEET_CALLS, [{k: v for k, v in resume.items() if k != "fichier"}])
+    book.save()
     log(f"✅ Surveillance terminée : {resume['membres']} membres, "
         f"{resume['guerres']} lignes de guerre, {resume['journal']} guerres "
         f"au journal.")

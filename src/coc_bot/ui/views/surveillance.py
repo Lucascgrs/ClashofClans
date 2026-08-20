@@ -8,12 +8,16 @@ Deux usages dans un même écran :
   affichées sous le bouton.
 * **Scan incrémental** : le même composant que dans l'écran Scanner, mais
   sans la partie invitation — ici on ne fait qu'alimenter les Parquet.
+
+Le bouton « Générer les graphiques » produit en plus un rapport HTML interactif
+autonome (:mod:`coc_bot.core.reporting`) ouvert dans le navigateur.
 """
 
 from __future__ import annotations
 
 import os
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -77,6 +81,9 @@ class SurveillanceView(BaseView):
                              placeholder_text="#2R2YVCLJQ")
         entry.pack(side="left", padx=(0, theme.PAD_S))
         entry.bind("<Return>", lambda _e: self._run_surveillance())
+        # Sauvegarde dès qu'on quitte le champ — pas besoin de cliquer un
+        # bouton d'action pour que le tag soit retenu à la prochaine ouverture.
+        entry.bind("<FocusOut>", lambda _e: self._clan_tag())
 
         opts = ctk.CTkFrame(card.body, fg_color="transparent")
         opts.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
@@ -91,6 +98,9 @@ class SurveillanceView(BaseView):
         ctk.CTkButton(actions, text="🛰 Surveiller maintenant", width=200,
                       fg_color=theme.SUCCESS, hover_color=theme.ACCENT_HOVER,
                       command=self._run_surveillance).pack(side="left", padx=(0, theme.PAD_S))
+        ctk.CTkButton(actions, text="📊 Générer les graphiques", width=200,
+                      fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                      command=self._build_report).pack(side="left", padx=(0, theme.PAD_S))
         ctk.CTkButton(actions, text="📂 Ouvrir le classeur", width=170,
                       command=self._open_workbook).pack(side="left", padx=(0, theme.PAD_S))
         ctk.CTkButton(actions, text="🔄 Rattraper les LDC archivées", width=230,
@@ -198,6 +208,27 @@ class SurveillanceView(BaseView):
                 self.after(0, self._refresh_calls)
 
         self.app.spawn_automation(task, name="rattrapage_ldc")
+
+    def _build_report(self):
+        """Génère le rapport HTML interactif et l'ouvre dans le navigateur."""
+        tag = self._require_tag()
+        if tag is None:
+            return
+
+        def task():
+            try:
+                from ...core import reporting
+                path = reporting.build_report(tag, log=self.app.log)
+                webbrowser.open(f"file:///{path.replace(os.sep, '/')}")
+            except (FileNotFoundError, ValueError) as e:
+                # Cas attendus : clan jamais surveillé, classeur encore vide.
+                self.app.log(f"⚠ {e}")
+                self.after(0, lambda: messagebox.showwarning("Graphiques", str(e)))
+            except Exception as e:
+                self.app.log(f"Erreur génération du rapport : {e}")
+                self.after(0, lambda: messagebox.showerror("Graphiques", str(e)))
+
+        self.app.spawn_automation(task, name="rapport_graphiques")
 
     def _refresh_calls(self):
         """Recharge le tableau des 5 dernières exécutions du clan courant."""
