@@ -1,16 +1,20 @@
-"""Écran Surveillance — historique horodaté d'un clan + scan incrémental.
+"""Écran Surveillance — historique horodaté d'un clan.
 
-Deux usages dans un même écran :
-
-* **Surveiller un clan** : un tag, un bouton, et chaque exécution empile un
-  relevé daté (membres, guerres classiques, Ligue des clans, journal de
-  guerre) dans ``Surveillance/<TAG>.xlsx``. Les 5 dernières exécutions sont
-  affichées sous le bouton.
-* **Scan incrémental** : le même composant que dans l'écran Scanner, mais
-  sans la partie invitation — ici on ne fait qu'alimenter les Parquet.
+Un tag, un bouton : chaque exécution empile un relevé daté (membres, guerres
+classiques, Ligue des clans, journal de guerre) dans ``Surveillance/<TAG>.xlsx``.
+Les 5 dernières exécutions sont affichées sous le bouton.
 
 Le bouton « Générer les graphiques » produit en plus un rapport HTML interactif
-autonome (:mod:`coc_bot.core.reporting`) ouvert dans le navigateur.
+autonome (:mod:`coc_bot.core.reporting`), ouvert dans le navigateur et publié
+dans le salon Discord.
+
+La carte « Synchronisation Discord » partage le classeur entre plusieurs
+ordinateurs (:mod:`coc_bot.core.discord_sync`) : le distant est fusionné avant
+chaque surveillance et republié après, sans manipulation de fichier.
+
+Les filtres de recherche, la sélection de pays et le scan incrémental vivaient
+ici en doublon de l'écran Scanner, qui reste leur seul point d'entrée : cet
+écran ne s'occupe plus que de la surveillance d'un clan.
 """
 
 from __future__ import annotations
@@ -26,7 +30,6 @@ from ...core import orchestration
 from .. import theme
 from ..base_view import BaseView
 from ..widgets import Card, LogPanel, hint_label, styled_treeview
-from .scan_common import IncrementalScanPanel
 
 #: Clé de persistance du dernier tag surveillé (réglages d'orchestration).
 _SETTING_KEY = "surveillance_clan_tag"
@@ -56,17 +59,20 @@ class SurveillanceView(BaseView):
 
         settings = orchestration.load_settings()
         self.v_clan_tag = tk.StringVar(value=settings.get(_SETTING_KEY, ""))
+        self.v_sync_channel = tk.StringVar(value="")
+        self.v_sync_auto = tk.BooleanVar(value=True)
         self.v_membres = tk.BooleanVar(value=True)
         self.v_guerre = tk.BooleanVar(value=True)
         self.v_ldc = tk.BooleanVar(value=True)
         self.v_journal = tk.BooleanVar(value=True)
 
         self._build_clan_card(body)
+        self._build_sync_card(body)
         self._build_calls_card(body)
-        self._build_scan_card(body)
         self._build_log_card(body)
 
         self._refresh_calls()
+        self._refresh_sync_status()
 
     # =====================================================================
     # Construction
@@ -120,6 +126,60 @@ class SurveillanceView(BaseView):
         hint.configure(wraplength=880)
         hint.grid(row=3, column=0, sticky="ew", pady=(theme.PAD_S, 0))
 
+    def _build_sync_card(self, body):
+        """Carte de synchronisation du classeur entre plusieurs ordinateurs."""
+        from ...core import discord_sync
+
+        settings = orchestration.load_settings()
+        self.v_sync_channel.set(str(settings.get(discord_sync.SETTING_CHANNEL, "")))
+        self.v_sync_auto.set(bool(settings.get(discord_sync.SETTING_AUTO, True)))
+
+        card = Card(body, title="Synchronisation Discord",
+                    subtitle="Partage le classeur entre plusieurs ordinateurs : le "
+                             "classeur du salon est fusionné avant chaque "
+                             "surveillance, puis republié après.")
+        card.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
+
+        row = ctk.CTkFrame(card.body, fg_color="transparent")
+        row.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(row, text="ID du salon :").pack(side="left", padx=(0, theme.PAD_S))
+        entry = ctk.CTkEntry(row, textvariable=self.v_sync_channel, width=200,
+                             placeholder_text="123456789012345678")
+        entry.pack(side="left", padx=(0, theme.PAD_S))
+        entry.bind("<FocusOut>", lambda _e: self._save_sync_settings())
+        ctk.CTkCheckBox(row, text="Synchroniser automatiquement",
+                        variable=self.v_sync_auto,
+                        command=self._save_sync_settings).pack(side="left")
+
+        actions = ctk.CTkFrame(card.body, fg_color="transparent")
+        actions.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+        # « Récupérer » et « Envoyer » séparément n'avaient d'intérêt que pour
+        # déboguer : « Synchroniser » enchaîne les deux dans le bon ordre, et
+        # c'est ce que fait déjà chaque surveillance.
+        for text, width, command in [
+            ("🔌 Tester la connexion", 190, self._test_sync),
+            ("🔄 Synchroniser", 160, self._full_sync),
+        ]:
+            ctk.CTkButton(actions, text=text, width=width,
+                          command=command).pack(side="left", padx=(0, theme.PAD_S))
+
+        self.sync_status = ctk.CTkLabel(card.body, text="", anchor="w",
+                                        justify="left")
+        self.sync_status.grid(row=2, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+
+        hint = hint_label(
+            card.body,
+            "Le token du bot est un secret : il se met dans le fichier .env du "
+            "projet (DISCORD_BOT_TOKEN=…), jamais ici. L'ID du salon s'obtient "
+            "par un clic droit sur le salon → « Copier l'identifiant » (mode "
+            "développeur activé dans Paramètres → Avancés). Le classeur et le "
+            "rapport sont republiés à chaque fois et les versions précédentes "
+            "effacées du fil (les 3 dernières sont conservées, en filet de "
+            "sécurité). Deux postes qui surveillent chacun de leur côté voient "
+            "leurs relevés fusionnés au lieu de s'écraser.")
+        hint.configure(wraplength=880)
+        hint.grid(row=3, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+
     def _build_calls_card(self, body):
         card = Card(body, title="5 dernières exécutions",
                     subtitle="Historique des appels de la surveillance pour ce clan.")
@@ -137,10 +197,6 @@ class SurveillanceView(BaseView):
         ctk.CTkButton(card.body, text="↻ Rafraîchir", width=120,
                       command=self._refresh_calls).grid(row=1, column=0, sticky="w",
                                                         pady=(theme.PAD_S, 0))
-
-    def _build_scan_card(self, body):
-        self.scan_panel = IncrementalScanPanel(body, self.app)
-        self.scan_panel.pack(fill="x")
 
     def _build_log_card(self, body):
         card = Card(body, title="Journal")
@@ -212,6 +268,63 @@ class SurveillanceView(BaseView):
 
         self.app.spawn_automation(task, name="rattrapage_ldc")
 
+    # ---------------------------------------------------------------- sync
+    def _save_sync_settings(self):
+        """Retient l'ID de salon et le mode automatique dans les réglages."""
+        from ...core import discord_sync
+
+        settings = orchestration.load_settings()
+        channel = "".join(c for c in self.v_sync_channel.get() if c.isdigit())
+        self.v_sync_channel.set(channel)
+        settings[discord_sync.SETTING_CHANNEL] = channel
+        settings[discord_sync.SETTING_AUTO] = bool(self.v_sync_auto.get())
+        orchestration.save_settings(settings)
+        self._refresh_sync_status()
+
+    def _refresh_sync_status(self):
+        """Affiche l'état de la configuration sans rien appeler sur le réseau."""
+        from ...core import discord_sync
+
+        pret, message = discord_sync.is_configured()
+        if pret and not discord_sync.auto_sync_enabled():
+            message = ("Configuration complète — synchronisation automatique "
+                       "désactivée (boutons manuels uniquement).")
+        self.sync_status.configure(
+            text=("✅ " if pret else "⚠ ") + message,
+            text_color=theme.SUCCESS if pret else theme.WARNING)
+
+    def _sync_task(self, name: str, action):
+        """Lance une action Discord en tâche de fond, erreurs affichées."""
+        from ...core.discord_sync import DiscordSyncError
+
+        tag = self._require_tag()
+        if tag is None:
+            return
+
+        def task():
+            try:
+                action(tag)
+            except DiscordSyncError as e:
+                # Erreurs prévues (token, droits, salon) : le message est déjà
+                # rédigé pour être lu par un humain.
+                self.app.log(f"⚠ Discord : {e}")
+                self.after(0, lambda: messagebox.showwarning("Discord", str(e)))
+            except Exception as e:
+                self.app.log(f"Erreur Discord : {e}")
+                self.after(0, lambda: messagebox.showerror("Discord", str(e)))
+
+        self.app.spawn_automation(task, name=name)
+
+    def _test_sync(self):
+        from ...core import discord_sync
+        self._sync_task("discord_test",
+                        lambda _tag: discord_sync.check_access(log=self.app.log))
+
+    def _full_sync(self):
+        from ...core import discord_sync
+        self._sync_task("discord_sync",
+                        lambda tag: discord_sync.sync(tag, log=self.app.log))
+
     def _build_report(self):
         """Génère le rapport HTML interactif et l'ouvre dans le navigateur."""
         tag = self._require_tag()
@@ -220,9 +333,30 @@ class SurveillanceView(BaseView):
 
         def task():
             try:
+                # Tracer un rapport sur un classeur périmé est le meilleur moyen
+                # de conclure à tort qu'un joueur n'a pas attaqué : on récupère
+                # d'abord ce que les autres postes ont relevé.
+                try:
+                    from ...core import discord_sync
+                    if discord_sync.auto_sync_enabled() and discord_sync.is_configured()[0]:
+                        discord_sync.pull(tag, log=self.app.log)
+                except Exception as e:
+                    self.app.log(f"⚠ Discord : rapport tracé sur le classeur "
+                                 f"local ({e}).")
+
                 from ...core import reporting
                 path = reporting.build_report(tag, log=self.app.log)
                 webbrowser.open(f"file:///{path.replace(os.sep, '/')}")
+
+                # Le rapport rejoint le classeur dans le salon : le fraîchement
+                # généré remplace le précédent, comme pour le classeur.
+                try:
+                    from ...core import discord_sync
+                    if discord_sync.auto_sync_enabled() and discord_sync.is_configured()[0]:
+                        discord_sync.publish_report(tag, path, log=self.app.log)
+                except Exception as e:
+                    self.app.log(f"⚠ Discord : rapport non publié ({e}). "
+                                 f"Il reste disponible en local.")
             except (FileNotFoundError, ValueError) as e:
                 # Cas attendus : clan jamais surveillé, classeur encore vide.
                 self.app.log(f"⚠ {e}")

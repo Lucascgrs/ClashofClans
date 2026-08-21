@@ -105,6 +105,19 @@ _DEDUP_KEYS = {
 #: ``first_seen`` date la découverte du war tag et ne doit pas bouger.
 _DEDUP_KEEP = {SHEET_CWL_TAGS: "first"}
 
+#: Colonne datant chaque ligne, utilisée pour départager deux versions d'une
+#: même ligne lors d'une fusion entre postes (:func:`merge_sheets`). Sans elle,
+#: « la dernière ligne gagne » voudrait dire « la dernière arrivée », c'est-à-dire
+#: le hasard de l'ordre de concaténation plutôt que la donnée la plus fraîche.
+_FRESHNESS = {
+    SHEET_MEMBERS: "timestamp",
+    SHEET_CLAN: "timestamp",
+    SHEET_WARS: "collected_at",
+    SHEET_WARLOG: None,     # cas particulier, voir _sort_by_freshness
+    SHEET_CWL_TAGS: "first_seen",
+    SHEET_CALLS: "timestamp",
+}
+
 #: War tag « vide » renvoyé par l'API pour les rounds LDC pas encore joués.
 _EMPTY_WAR_TAG = "#0"
 
@@ -875,17 +888,100 @@ def refetch_archived_cwl(clan_tag: str, season: str | None = None,
 
 
 # =============================================================================
+# FUSION DE DEUX CLASSEURS (synchronisation entre postes)
+# =============================================================================
+
+def _blank(value) -> bool:
+    """Cellule vide au sens du tableur (``NaN``, ``""``, ``inconnu``)."""
+    if value is None or pd.isna(value):
+        return True
+    return str(value).strip() in ("", "inconnu")
+
+
+def _sort_by_freshness(df: pd.DataFrame, sheet: str) -> pd.DataFrame:
+    """Ordonne une feuille de la ligne la plus ancienne à la plus fraîche.
+
+    La déduplication qui suit garde la dernière (ou la première pour
+    ``TagsLDC``) : après ce tri, « dernière » veut enfin dire « la plus
+    récemment relevée », quel que soit le poste qui l'a produite."""
+    column = _FRESHNESS.get(sheet)
+    if column and column in df.columns:
+        return df.sort_values(column, kind="stable", na_position="first")
+    if sheet == SHEET_WARLOG and "result" in df.columns:
+        # Le journal n'est pas horodaté par le relevé. Le seul départage utile
+        # est la complétude : une entrée sans résultat ne doit jamais chasser
+        # la même guerre correctement renseignée.
+        rang = df["result"].map(lambda v: 0 if _blank(v) else 1)
+        return (df.assign(_rang=rang)
+                  .sort_values("_rang", kind="stable")
+                  .drop(columns="_rang"))
+    return df
+
+
+def merge_sheets(book: Workbook, autres: dict[str, pd.DataFrame],
+                 log: Callable = logging.info) -> int:
+    """Fusionne les feuilles d'un autre classeur dans ``book``.
+
+    C'est ce qui rend la surveillance multi-postes possible sans rien perdre :
+    chaque feuille étant dédupliquée sur une clé stable, deux classeurs
+    divergents s'**additionnent** au lieu de s'écraser. Un poste qui a relevé
+    la guerre et un autre la Ligue des clans donnent, une fois fusionnés, le
+    classeur complet — là où un simple partage de fichier binaire aurait
+    sacrifié l'un des deux.
+
+    Les feuilles inconnues du module (ajoutées à la main dans le tableur) sont
+    reprises telles quelles plutôt qu'ignorées.
+
+    Retourne le nombre de lignes que ``autres`` a réellement apportées."""
+    apportees = 0
+    for sheet, distant in autres.items():
+        if distant is None or distant.empty:
+            continue
+
+        local = book.get(sheet)
+        if local.empty:
+            book.sheets[sheet] = distant.reset_index(drop=True)
+            book.dirty = True
+            apportees += len(distant)
+            continue
+
+        avant = len(local)
+        df = pd.concat([local, distant], ignore_index=True)
+        keys = [k for k in _DEDUP_KEYS.get(sheet, []) if k in df.columns]
+        if keys:
+            df = _sort_by_freshness(df, sheet)
+            df = df.drop_duplicates(subset=keys,
+                                    keep=_DEDUP_KEEP.get(sheet, "last"))
+        else:
+            df = df.drop_duplicates()
+
+        book.sheets[sheet] = df.reset_index(drop=True)
+        book.dirty = True
+        nouvelles = len(df) - avant
+        if nouvelles:
+            log(f"   ↳ {sheet} : +{nouvelles} ligne(s) venues de l'autre poste.")
+        apportees += nouvelles
+    return apportees
+
+
+# =============================================================================
 # POINT D'ENTRÉE
 # =============================================================================
 
 def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
                     ldc: bool = True, journal: bool = True,
-                    log: Callable = logging.info) -> dict:
+                    sync: bool = True, log: Callable = logging.info) -> dict:
     """Exécute une passe de surveillance et enregistre le classeur du clan.
 
     Chaque source est indépendante : un journal de guerre privé ou une absence
     de LDC n'empêche pas le relevé des membres. Retourne un récapitulatif
-    (également écrit dans la feuille ``Appels``)."""
+    (également écrit dans la feuille ``Appels``).
+
+    Si la synchronisation Discord est configurée (voir
+    :mod:`coc_bot.core.discord_sync`), le classeur distant est fusionné **avant**
+    les collectes et republié **après** : surveiller depuis un autre poste
+    reprend alors là où le précédent s'est arrêté. ``sync=False`` force un
+    passage strictement local."""
     clan_tag = normalize_tag(clan_tag)
     if not clan_tag:
         raise ValueError("Tag de clan vide ou invalide.")
@@ -896,6 +992,12 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
     log(f"🛰 Surveillance de {clan_tag} → {os.path.basename(path)}")
 
     book = Workbook(path)
+
+    # Le distant est fusionné avant tout le reste : les collectes qui suivent
+    # doivent voir ce que les autres postes ont déjà relevé, faute de quoi
+    # elles ré-ajouteraient des lignes que la fusion aurait ensuite à départager.
+    if sync:
+        _sync_pull(clan_tag, book, log)
 
     # Avant toute collecte : les lignes déjà présentes doivent porter les mêmes
     # identifiants que celles qui arrivent, sinon elles ne peuvent pas être
@@ -953,7 +1055,46 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
         f"{resume['guerres']} nouvelle(s) ligne(s) de guerre, "
         f"{resume['maj_guerres']} mise(s) à jour, {resume['journal']} guerres "
         f"au journal.")
+
+    # Publication après l'enregistrement local : le classeur du disque reste la
+    # source de vérité, Discord n'en est que le miroir partagé.
+    if sync:
+        _sync_push(clan_tag, log)
     return resume
+
+
+def _sync_pull(clan_tag: str, book: Workbook, log: Callable) -> None:
+    """Fusionne le classeur distant, sans jamais faire échouer la surveillance.
+
+    Discord est un confort, pas une dépendance : salon injoignable, token
+    périmé ou serveur en carafe ne doivent pas empêcher de relever une guerre
+    qui, elle, ne repassera pas."""
+    try:
+        from . import discord_sync
+        if not discord_sync.auto_sync_enabled():
+            return
+        pret, _ = discord_sync.is_configured()
+        if not pret:
+            return
+        discord_sync.pull(clan_tag, book, log=log)
+    except Exception as e:
+        log(f"⚠ Discord : récupération impossible ({e}). "
+            f"La surveillance continue en local.")
+
+
+def _sync_push(clan_tag: str, log: Callable) -> None:
+    """Publie le classeur mis à jour ; un échec reste sans conséquence locale."""
+    try:
+        from . import discord_sync
+        if not discord_sync.auto_sync_enabled():
+            return
+        pret, _ = discord_sync.is_configured()
+        if not pret:
+            return
+        discord_sync.push(clan_tag, log=log)
+    except Exception as e:
+        log(f"⚠ Discord : envoi impossible ({e}). Le classeur local est à jour ; "
+            f"il sera republié à la prochaine surveillance.")
 
 
 def derniers_appels(clan_tag: str, n: int = 5) -> list[dict]:

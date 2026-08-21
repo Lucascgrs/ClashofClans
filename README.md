@@ -33,6 +33,9 @@ séparation nette **logique métier** (`coc_bot.core`) / **interface**
   validation. Coordonnées définies par un assistant guidé.
 - **Rituel remparts intercalé** : toutes les N attaques, le bot interrompt la
   session pour aller améliorer les remparts.
+- **Surveillance d'un clan dans le temps** : relevé daté des membres, des guerres
+  classiques et de la Ligue des clans dans un classeur Excel par clan, avec
+  **rapport HTML interactif** et **synchronisation multi-postes par Discord**.
 - **Export Excel** des bases scannées.
 
 ---
@@ -96,7 +99,7 @@ restent toujours visibles en bas de la barre.
 | Écran | Rôle |
 |---|---|
 | 🔎 **Scanner** | Filtres, sélection des pays, scans joueurs/clans, recherche aléatoire + invitation |
-| 🛰 **Surveillance** | Historique horodaté d'un clan (voir plus bas), scan incrémental, journal d'exécution |
+| 🛰 **Surveillance** | Historique horodaté d'un clan, rapport graphique, synchronisation Discord (voir plus bas) |
 | 🎮 **Jeu & Attaques** | Macros, enregistreur, gestion des comptes, sessions d'attaques + rituels (remparts / améliorations) |
 | 🧱 **Auto Remparts** | Configuration et lancement de l'amélioration automatique des remparts (OCR + clics) |
 | ⬆ **Auto Améliorations** | Amélioration du premier choix payable de la liste (or / élixir / élixir noir), configs nommées |
@@ -113,6 +116,20 @@ exécution, un relevé daté dans un classeur Excel propre au clan —
 qui permet de suivre l'évolution des membres dans le temps. Les 5 dernières
 exécutions sont affichées sous le bouton.
 
+#### Lancer une surveillance
+
+1. Saisissez le **tag du clan** (`#2R2YVCLJQ` ; la casse et le `#` sont
+   rattrapés automatiquement). Il est mémorisé pour la prochaine session.
+2. Cochez les sources voulues — **Membres**, **Guerre classique**,
+   **Ligue des clans**, **Journal de guerre**. Chacune est indépendante : un
+   journal de guerre privé ou une absence de LDC n'empêche pas le reste.
+3. Cliquez **🛰 Surveiller maintenant**.
+
+Les autres boutons : **📊 Générer les graphiques** (rapport HTML, voir plus
+bas), **📂 Ouvrir le classeur** (dans Excel), **🔄 Rattraper les LDC archivées**
+(re-interroge les war tags déjà archivés pour compléter une saison collectée
+partiellement).
+
 | Feuille | Contenu |
 |---|---|
 | `Membres` | 1 ligne par joueur **et par date d'appel** |
@@ -122,8 +139,53 @@ exécutions sont affichées sous le bouton.
 | `TagsLDC` | war tags de Ligue des clans archivés |
 | `Appels` | trace de chaque exécution |
 
-Chaque feuille est dédouplonnée sur sa propre clé : relancer la surveillance
+Chaque feuille est dédoublonnée sur sa propre clé : relancer la surveillance
 dix fois dans la journée n'ajoute que les nouveautés.
+
+#### Les guerres en cours se mettent à jour toutes seules
+
+Relancer une surveillance pendant une guerre **réécrit** les lignes existantes
+avec les attaques faites depuis, au lieu d'en créer de nouvelles. Le tableau des
+exécutions distingue donc deux compteurs :
+
+| Colonne | Signification |
+|---|---|
+| `Guerres` | lignes **ajoutées** (une guerre jamais vue) |
+| `Màj guerres` | lignes **modifiées** (attaques, étoiles, état, résultat) |
+
+Un passage pendant une guerre déjà relevée affiche donc `0` / `15` : c'est
+normal, et c'est le second chiffre qui compte.
+
+En fin de passage, une étape de rattrapage reprend les guerres du classeur qui
+ne sont pas terminées :
+
+- **Ligue des clans** — le war tag reste interrogeable des mois plus tard, le
+  round est donc redemandé même si la saison est close ;
+- **Guerre classique** — le détail par joueur est perdu dès que `/currentwar`
+  passe à la guerre suivante, mais le score final est repris du journal de
+  guerre, ce qui garde le bilan victoires / défaites juste.
+
+#### À quelle fréquence surveiller ?
+
+C'est la question qui détermine la qualité des données, parce que l'API ne
+permet pas de remonter le temps.
+
+| Source | Fenêtre de récupération | Ce qui est perdu ensuite |
+|---|---|---|
+| **Guerre classique** (`/currentwar`) | Reste en `warEnded` avec tout le détail **jusqu'à ce que le clan relance une recherche de guerre** — pas de minuteur | Le détail par joueur, définitivement |
+| **Ligue des clans** (`/clanwarleagues/wars/{warTag}`) | **Des mois.** Seuls les war tags sont éphémères : ils ne s'obtiennent que pendant la semaine de LDC | Rien, si un passage a eu lieu pendant la semaine |
+| **Journal de guerre** (`/warlog`) | 50 dernières guerres | Il n'a de toute façon jamais le détail joueur |
+
+En pratique :
+
+- **Inutile de viser la fin d'une LDC.** Un seul passage pendant la semaine de
+  ligue archive les war tags ; tout le reste se rattrape après, automatiquement.
+- **Viser la fin d'une guerre classique ne marche pas de façon fiable** : la
+  fenêtre ne dépend pas d'un délai mais du moment où un chef relance la
+  recherche — cela peut être dix minutes comme trois jours après la fin.
+- **La bonne réponse est la fréquence, pas le minutage** : une passe toutes les
+  ~6 h capture la fin de n'importe quelle guerre avant que la suivante ne
+  démarre. L'écran 🗂 **Orchestration** permet de la planifier.
 
 ### Rapport graphique
 
@@ -138,7 +200,7 @@ inclus, aucune ressource réseau) qui s'ouvre dans le navigateur.
   sur l'axe X, avec cases à cocher (« Tous » / « Aucun ») pour choisir qui
   afficher. Huit joueurs au maximum reçoivent une couleur ; au-delà les lignes
   passent en gris — aucune palette ne reste distinguable plus loin.
-- **Effectif** et **niveau d'HDV moyen** du clan dans le temps.
+- **Effectif** du clan dans le temps.
 - **Trois tableaux colorés** : synthèse par joueur (assiduité aux attaques,
   étoiles moyennes par guerre, % de destruction, date de première détection),
   détail par joueur et par guerre, et dons par joueur et par mois.
@@ -170,6 +232,133 @@ construit en surveillant régulièrement :
 D'où la feuille `TagsLDC` : les war tags sont archivés dès qu'ils apparaissent,
 et le bouton **🔄 Rattraper les LDC archivées** les rejoue pour compléter une
 saison collectée partiellement.
+
+C'est la traduction technique de [« À quelle fréquence surveiller ? »](#à-quelle-fréquence-surveiller)
+plus haut : la surveillance rattrape automatiquement tout ce qui peut l'être,
+mais le détail joueur d'une guerre classique manquée est perdu pour de bon.
+
+### Synchroniser entre plusieurs ordinateurs (Discord)
+
+Surveiller depuis deux postes pose un problème : chacun tient son propre
+classeur et ignore ce que l'autre a relevé. Un dossier OneDrive ou Dropbox ne
+règle rien — un `.xlsx` est un binaire, deux écritures parallèles donnent une
+« copie en conflit » et un relevé perdu.
+
+La synchronisation Discord fait autre chose : elle **fusionne**. Chaque feuille
+étant dédoublonnée sur une clé stable, deux classeurs divergents
+s'**additionnent** ligne à ligne au lieu de s'écraser, la version la plus
+fraîche l'emportant en cas de doublon. Un poste qui surveille pendant la guerre
+et un autre pendant la LDC obtiennent, après fusion, le même classeur complet.
+
+Le cycle, joué automatiquement autour de chaque surveillance :
+
+```
+⬇ fusionner le classeur du salon → surveiller → 💾 sauver en local → ⬆ republier
+```
+
+#### Mise en place (une seule fois)
+
+**1. Créer le bot**
+
+1. <https://discord.com/developers/applications> → **New Application**.
+2. Onglet **Bot** → **Reset Token** → copiez le token.
+3. Toujours dans **Bot**, activez **Message Content Intent** (simple
+   interrupteur, aucune vérification requise en dessous de 100 serveurs).
+
+**2. Inviter le bot sur le serveur**
+
+Onglet **OAuth2 → URL Generator** : scope `bot`, permissions **Voir le salon**,
+**Envoyer des messages**, **Joindre des fichiers**, **Lire l'historique des
+messages**. Ou directement, avec votre *client ID* :
+
+```
+https://discord.com/api/oauth2/authorize?client_id=VOTRE_CLIENT_ID&scope=bot&permissions=101376
+```
+
+> Le bot apparaîtra **hors ligne** dans la liste des membres : c'est normal. La
+> synchronisation passe par l'API REST et non par la passerelle temps réel, le
+> bot ne « se connecte » donc jamais. Cela n'empêche rien.
+
+**3. Créer un salon dédié**
+
+Un salon **privé** de préférence — le classeur contient les données de vos
+membres. ⚠ **Rendre un salon privé n'y ajoute pas le bot** : clic droit sur le
+salon → *Modifier le salon* → *Permissions* → **Ajouter des membres ou des
+rôles** → votre bot → cochez les quatre droits ci-dessus. C'est la cause n°1
+des erreurs `403`.
+
+Un salon dédié n'est pas obligatoire mais recommandé : la recherche du dernier
+fichier remonte 500 messages.
+
+**4. Configurer chaque poste**
+
+Le token est un secret, il va dans le `.env` (jamais versionné) :
+
+```ini
+DISCORD_BOT_TOKEN=le_token_copié_à_l_étape_1
+DISCORD_SYNC_CHANNEL_ID=123456789012345678
+```
+
+L'identifiant du salon n'étant pas secret, il peut aussi être saisi dans la
+carte **Synchronisation Discord** de l'écran (il est alors retenu dans
+`Orchestration/orchestration_settings.json`). La variable d'environnement, si
+elle existe, l'emporte.
+
+Pour l'obtenir : *Paramètres Discord → Avancés → Mode développeur*, puis clic
+droit sur le salon → **Copier l'identifiant**.
+
+**Sur les autres postes : le même token et le même identifiant de salon.**
+
+Cliquez enfin **🔌 Tester la connexion** : il vérifie le token, la visibilité du
+salon et l'accès à l'historique séparément, et nomme précisément l'étape qui
+échoue.
+
+#### Au quotidien
+
+| Bouton | Effet |
+|---|---|
+| **🔌 Tester la connexion** | Diagnostic en trois étapes, sans rien envoyer |
+| **🔄 Synchroniser** | Fusionne le classeur du salon puis republie, sans relever quoi que ce soit |
+| *(case à cocher)* **Synchroniser automatiquement** | Active le cycle autour de chaque surveillance et de chaque rapport |
+
+Deux fichiers transitent par le salon : le **classeur** `<TAG>.xlsx`, fusionné
+entre postes, et le **rapport** `<TAG>_rapport.html`, republié tel quel à chaque
+clic sur *Générer les graphiques*. Discord n'affiche pas une page HTML dans le
+fil : la pièce jointe se télécharge et s'ouvre dans un navigateur — le rapport
+étant autonome, il fonctionne hors ligne sur n'importe quelle machine.
+
+L'API Discord ne sait pas mettre un fichier à jour en place : chaque envoi crée
+un message. Les versions précédentes sont donc **effacées dans la foulée**, sans
+quoi le fil accumulerait une pièce jointe par synchronisation. Par défaut seule
+la version courante est conservée ; pour garder un filet de sécurité en cas
+d'envoi corrompu, montez `discord_sync_keep_versions` dans
+`Orchestration/orchestration_settings.json` :
+
+```json
+{
+    "discord_sync_channel_id": "123456789012345678",
+    "discord_sync_auto": true,
+    "discord_sync_keep_versions": 3
+}
+```
+
+#### Bon à savoir
+
+- **Discord n'est jamais bloquant.** Salon injoignable, token périmé, coupure
+  réseau : la surveillance continue en local et republiera au passage suivant.
+  Une guerre en cours ne repasse pas — pas question de la rater pour un souci
+  de synchronisation. Le classeur du disque reste la source de vérité, le salon
+  n'en est que le miroir partagé.
+- **Limite de 10 Mo** par pièce jointe sur un serveur non boosté. Un classeur
+  pèse quelques dizaines de kilo-octets et grossit de l'ordre du mégaoctet par
+  année de relevés quotidiens ; au-delà, l'envoi est refusé avec un message
+  clair plutôt qu'une erreur Discord obscure.
+- Les CGU développeur de Discord déconseillent l'usage comme stockage de
+  fichiers. Pour quelques dizaines de kilo-octets poussés quelques fois par
+  jour, l'usage reste modeste — mais ce n'est pas un service de sauvegarde
+  garanti.
+
+---
 
 ### Première utilisation
 
@@ -212,7 +401,8 @@ ClashOfClans/
 ├── Configs/              # TOUS les fichiers de configuration JSON
 │   ├── *.json                # configs actives (base, upgrades, research, comptes…)
 │   ├── Base/ Upgrades/ Research/ MultiCompte/   # configs nommées (générées)
-├── Orchestration/        # scénarios d'enchaînement (générés)
+├── Orchestration/        # scénarios d'enchaînement + réglages (générés)
+├── Surveillance/         # classeurs et rapports par clan (générés, non versionnés)
 └── src/coc_bot/
     ├── __main__.py       # `python -m coc_bot`
     ├── paths.py          # chemins ABSOLUS centralisés (+ COC_BOT_DATA_DIR)
@@ -220,6 +410,7 @@ ClashOfClans/
     │   ├── coc_api.py        # API Clash of Clans : scans, filtres, invitations, exports
     │   ├── surveillance.py   # historique horodaté d'un clan (membres, guerres, LDC)
     │   ├── reporting.py      # rapport HTML interactif autonome (+ report_template.html)
+    │   ├── discord_sync.py   # partage du classeur entre postes via un salon Discord
     │   ├── token_manager.py  # génération/rafraîchissement du token API Supercell
     │   ├── env_setup.py      # configuration interactive du .env (CustomTkinter)
     │   ├── playback.py       # LecteurPosition — rejeu de macros + DPI awareness
@@ -234,8 +425,7 @@ ClashOfClans/
         ├── theme.py          # couleurs, polices, espacement
         ├── widgets.py        # cartes, journaux, assistants de capture, listes…
         └── views/            # un écran par module (scan, surveillance, game, walls…)
-            └── scan_common.py # filtres + pays + scan incrémental, partagés
-                               # par les écrans Scanner et Surveillance
+            └── scan_common.py # filtres + pays + scan incrémental (écran Scanner)
 ```
 
 > **Réutilisation** : toute la logique vit dans `coc_bot.core` et ne dépend pas
@@ -257,7 +447,10 @@ ClashOfClans/
 | `Configs/leagues.json` | Cache local des ligues Supercell (ordre de progression) |
 | `player_tags.txt` | Liste de tags joueurs (édition manuelle) |
 | `All_Players.parquet`, `All_Clans.parquet` | Données scannées (générées) |
-| `.env` | Identifiants Supercell pour la génération du token (**ne jamais committer**) |
+| `Surveillance/<TAG>.xlsx` | Classeur de surveillance d'un clan (généré) — **données personnelles de joueurs, non versionné** |
+| `Surveillance/<TAG>_rapport.html` | Rapport graphique autonome (généré) |
+| `Orchestration/orchestration_settings.json` | Réglages : dernier clan surveillé, raccourci d'arrêt, salon Discord et purge des versions |
+| `.env` | Identifiants Supercell **et token du bot Discord** (**ne jamais committer**) |
 
 > `walls_config.json`, `attack_config.json` et `coords_config.json` sont créés
 > automatiquement avec des valeurs par défaut au premier lancement, puis
@@ -363,9 +556,10 @@ désactive l'étape correspondante.
 
 **Ne jamais committer** :
 
-- `.env` (identifiants Supercell)
+- `.env` (identifiants Supercell **et token du bot Discord**)
 - `Configs/accounts_config.json` (noms de vos comptes)
 - `*_token.json` (tokens API générés)
+- `Surveillance/` (classeurs et rapports : données personnelles de joueurs)
 
 Ces fichiers sont déjà exclus par `.gitignore`.
 
@@ -380,3 +574,8 @@ Ces fichiers sont déjà exclus par `.gitignore`.
 | Scroll dans le mauvais sens | Souris configurée à l'envers | Passer `scroll_amount` à une valeur positive |
 | Rituel remparts ne trouve jamais le mot | Police OCR confond `e`/`c`, le mot est tronqué | Réduire `keyword` à un préfixe court (ex. `"remp"`) |
 | Token API expire | Variable d'environnement absente | Vérifier `.env`, relancer pour régénérer le token |
+| Discord : `Accès refusé (403)` | Salon privé sans le bot dans ses permissions (cause n°1) | Modifier le salon → Permissions → *Ajouter des membres ou des rôles* → le bot → les 4 droits |
+| Discord : `Introuvable (404)` | Identifiant du **serveur** ou d'une catégorie copié à la place de celui du salon | Clic droit sur le salon textuel lui-même → *Copier l'identifiant* |
+| Discord : le bot est hors ligne | Comportement normal (API REST, pas de passerelle) | Rien à faire, la synchronisation fonctionne |
+| `Guerres` affiche `0` après une surveillance | La guerre était déjà relevée : elle a été **mise à jour**, pas ajoutée | Regarder la colonne `Màj guerres` |
+| Une guerre reste sans résultat | Guerre terminée entre deux passages, `/currentwar` était déjà passé à la suivante | Le score final est repris du journal ; surveiller plus souvent (~6 h) pour garder le détail joueur |

@@ -1,4 +1,6 @@
 {
     "stop_hotkey": "<f12>",
-    "surveillance_clan_tag": "#2R2YVCLJQ"
+    "surveillance_clan_tag": "#2R2YVCLJQ",
+    "discord_sync_channel_id": "1540485013869428868",
+    "discord_sync_auto": true
 }
