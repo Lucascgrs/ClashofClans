@@ -657,28 +657,22 @@ function renderPlayers() {
 }
 
 /* ===========================================================================
-   3. Effectif et niveau d'HDV moyen
+   3. Effectif du clan
    =========================================================================== */
 function renderRoster() {
   const pts = DATA.roster.points;
   if (pts.length < 2) return;
-  const c = card("Effectif et niveau moyen du clan",
-    "Deux mesures d'échelles différentes, donc deux graphiques : superposer un effectif "
-    + "et un niveau d'HDV sur deux axes inventerait une corrélation.");
+  const c = card("Effectif du clan",
+    "Nombre de membres relevé à chaque passage de la surveillance.");
 
   lineChart(c, {
     series: [{ label: "Effectif", color: "var(--series-1)", points: pts.map(p => ({ x: p.ts, y: p.effectif })) }],
     xType: "time", height: 170, yLabel: "Membres", yAuto: true, yInteger: true, yFloor: 0,
     title: "Effectif du clan", tipFormat: v => nf(v) + " membres",
   });
-  lineChart(c, {
-    series: [{ label: "HDV moyen", color: "var(--series-2)", points: pts.map(p => ({ x: p.ts, y: p.hdv })) }],
-    xType: "time", height: 170, yLabel: "Niveau d'HDV moyen", yAuto: true,
-    title: "Niveau d'HDV moyen", yFormat: v => nf(v, 1), tipFormat: v => nf(v, 2),
-  });
 
-  tableView(c, "Voir les données", ["Date", "Effectif", "HDV moyen"],
-    pts.map(p => [p.date, p.effectif, nf(p.hdv, 2)]));
+  tableView(c, "Voir les données", ["Date", "Effectif"],
+    pts.map(p => [p.date, p.effectif]));
 }
 
 /* ===========================================================================

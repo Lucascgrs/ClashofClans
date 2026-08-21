@@ -43,6 +43,27 @@ rétroactivement**, il se construit en appelant régulièrement. D'où la feuill
 ``TagsLDC`` : les war tags sont archivés dès qu'ils apparaissent, ce qui permet
 de re-requêter une saison LDC bien après sa fin via
 :func:`refetch_archived_cwl`.
+
+Fraîcheur des données — jusqu'à quand peut-on récupérer une guerre ?
+--------------------------------------------------------------------
+* **Guerre classique** : une fois finie, ``/currentwar`` reste en état
+  ``warEnded`` avec tout le détail joueur **jusqu'à ce que le clan relance une
+  recherche de guerre**. Il n'y a donc aucun délai fixe : si personne ne
+  relance, la guerre reste lisible des jours durant ; si un chef relance dix
+  minutes après la fin, le détail est perdu définitivement. Surveiller
+  régulièrement (quelques heures d'intervalle) protège bien mieux que viser
+  l'heure de fin.
+* **Ligue des clans** : ``/clanwarleagues/wars/{warTag}`` répond encore des
+  mois après la saison. Seuls les war tags sont éphémères, puisqu'ils ne
+  s'obtiennent que pendant la semaine de LDC : un unique passage pendant cette
+  semaine suffit donc à tout sauver, le reste se rattrape ensuite.
+* **Journal de guerre** : ``/warlog`` garde les 50 dernières guerres. C'est le
+  filet de sécurité — il permet de retrouver le *score final* d'une guerre
+  classique manquée, jamais le détail par joueur.
+
+À chaque passage, :func:`refresh_open_wars` reprend donc les guerres du
+classeur qui ne sont pas encore terminées et les finalise avec ce que l'API
+accepte encore de donner.
 """
 
 from __future__ import annotations
@@ -117,6 +138,37 @@ def _iso(api_time: Optional[str]) -> str:
         return str(api_time)
 
 
+def _day(stamp) -> str:
+    """Jour d'un horodatage, au format API ou déjà converti.
+
+    ``20260820T162515.000Z`` et ``2026-08-20 16:25:15`` donnent tous deux
+    ``2026-08-20``."""
+    text = "" if stamp is None or pd.isna(stamp) else str(stamp).strip()
+    if len(text) >= 8 and text[:8].isdigit():
+        return f"{text[0:4]}-{text[4:6]}-{text[6:8]}"
+    return text[:10]
+
+
+def _clean_tag(value) -> str:
+    """Tag lu dans le classeur — chaîne vide s'il est absent ou factice."""
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value).strip()
+    return "" if text in ("", "nan", "None", _EMPTY_WAR_TAG) else text
+
+
+def _classic_war_id(clan_tag: str, end_time, opponent_tag) -> str:
+    """Identifiant stable d'une guerre classique.
+
+    ``/currentwar`` et ``/warlog`` ne datent pas la même guerre à la même
+    seconde — une seconde d'écart est la norme. Un identifiant à la seconde
+    faisait donc apparaître deux fois la même guerre dans le rapport : une fois
+    avec le détail joueur mais sans résultat, une fois avec le résultat mais
+    sans joueur. La **journée** de fin suffit à l'identifier, puisqu'une guerre
+    dure 47 h et qu'un clan n'en mène jamais deux à la fois."""
+    return f"{clan_tag}|{_day(end_time)}|{_clean_tag(opponent_tag)}"
+
+
 # =============================================================================
 # ACCÈS API (tolérant aux données privées)
 # =============================================================================
@@ -169,6 +221,78 @@ _SHEET_ORDER = (SHEET_MEMBERS, SHEET_CLAN, SHEET_WARS, SHEET_WARLOG,
                 SHEET_CWL_TAGS, SHEET_CALLS)
 
 
+#: Colonnes ignorées quand on cherche à savoir si une ligne a *vraiment*
+#: changé : elles bougent à chaque appel sans qu'aucune donnée de jeu n'ait
+#: évolué.
+_VOLATILE_COLUMNS = {"collected_at", "first_seen", "timestamp"}
+
+
+def _key_series(df: pd.DataFrame, keys: list[str]) -> pd.Series:
+    """Clé de déduplication concaténée (construction vectorisée)."""
+    out = df[keys[0]].astype(str)
+    for key in keys[1:]:
+        out = out + "\u0001" + df[key].astype(str)
+    return out
+
+
+def _differs(a, b) -> bool:
+    """Comparaison tolérante entre deux cellules (``NaN``, texte, nombre)."""
+    a_na, b_na = pd.isna(a), pd.isna(b)
+    if a_na or b_na:
+        return a_na != b_na
+    try:
+        return abs(float(a) - float(b)) > 1e-9
+    except (TypeError, ValueError):
+        return str(a) != str(b)
+
+
+def _count_updates(existing: pd.DataFrame, incoming: pd.DataFrame,
+                   keys: list[str]) -> int:
+    """Nombre de lignes déjà présentes que ``incoming`` modifie réellement."""
+    if existing.empty:
+        return 0
+    cols = [c for c in incoming.columns
+            if c in existing.columns and c not in keys
+            and c not in _VOLATILE_COLUMNS]
+    if not cols:
+        return 0
+
+    incoming_keys = _key_series(incoming, keys)
+    existing_keys = _key_series(existing, keys)
+    shared = set(incoming_keys) & set(existing_keys)
+    if not shared:
+        return 0
+
+    # Seules les lignes réellement concernées sont parcourues : la feuille
+    # ``Membres`` accumule des milliers de relevés qu'il serait absurde de
+    # comparer un par un à chaque passage.
+    subset = existing[existing_keys.isin(shared)]
+    before = dict(zip(_key_series(subset, keys),
+                      (row for _, row in subset.iterrows())))
+
+    changed = 0
+    for key, (_, row) in zip(incoming_keys, incoming.iterrows()):
+        reference = before.get(key)
+        if reference is None:
+            continue
+        if any(_differs(reference.get(c), row.get(c)) for c in cols):
+            changed += 1
+    return changed
+
+
+def _assign(df: pd.DataFrame, mask, column: str, value) -> None:
+    """Écrit ``value`` sur les lignes masquées, en élargissant le type au besoin.
+
+    Une colonne relue vide depuis Excel est typée ``float`` : y écrire un
+    résultat de guerre sans la convertir d'abord déclenche un avertissement de
+    pandas — et une erreur dans les versions à venir."""
+    if column not in df.columns or value is None or pd.isna(value):
+        return
+    if isinstance(value, str) and df[column].dtype != object:
+        df[column] = df[column].astype(object)
+    df.loc[mask, column] = value
+
+
 class Workbook:
     """Classeur de surveillance chargé en mémoire, écrit **une seule fois**.
 
@@ -193,15 +317,20 @@ class Workbook:
         """Feuille demandée (DataFrame vide si elle n'existe pas encore)."""
         return self.sheets.get(sheet, pd.DataFrame())
 
-    def append(self, sheet: str, rows: list[dict]) -> int:
-        """Fusionne ``rows`` et retourne le nombre de **nouvelles** lignes.
+    def append(self, sheet: str, rows: list[dict]) -> tuple[int, int]:
+        """Fusionne ``rows`` ; retourne ``(nouvelles lignes, lignes modifiées)``.
 
         La déduplication suit ``_DEDUP_KEYS[sheet]`` ; par défaut la dernière
         occurrence gagne, si bien qu'une guerre re-requêtée en cours de route
         voit ses lignes mises à jour (étoiles, % de destruction) au lieu d'être
-        dupliquée."""
+        dupliquée.
+
+        Compter les deux séparément est ce qui rend cette mise à jour
+        *visible* : relancer la surveillance pendant une guerre n'ajoute aucune
+        ligne mais peut en modifier trente, et n'annoncer que « 0 nouvelle »
+        donnait l'impression trompeuse d'un passage qui n'avait rien fait."""
         if not rows:
-            return 0
+            return 0, 0
 
         existing = self.get(sheet)
         before = len(existing)
@@ -210,12 +339,15 @@ class Workbook:
               if not existing.empty else new_df)
 
         keys = [k for k in _DEDUP_KEYS.get(sheet, []) if k in df.columns]
+        updated = 0
         if keys:
+            if _DEDUP_KEEP.get(sheet, "last") == "last":
+                updated = _count_updates(existing, new_df, keys)
             df = df.drop_duplicates(subset=keys, keep=_DEDUP_KEEP.get(sheet, "last"))
 
         self.sheets[sheet] = df.reset_index(drop=True)
         self.dirty = True
-        return len(self.sheets[sheet]) - before
+        return len(self.sheets[sheet]) - before, updated
 
     def save(self) -> None:
         """Écrit le classeur complet (sans effet si rien n'a changé)."""
@@ -329,7 +461,8 @@ def _war_rows(war: dict, clan_tag: str, war_type: str,
 
     state = war.get("state", "")
     end_time = _iso(war.get("endTime"))
-    war_id = war_tag or f"{clan_tag}|{war.get('endTime')}|{them.get('tag')}"
+    war_id = war_tag or _classic_war_id(clan_tag, war.get("endTime"),
+                                        them.get("tag"))
     result = _war_result(us, them, state)
     collected = _now()
 
@@ -390,8 +523,14 @@ def _warlog_rows(entries: list[dict], clan_tag: str) -> list[dict]:
         clan = e.get("clan") or {}
         opp = e.get("opponent") or {}
         is_cwl = not opp.get("tag")
+        # Une entrée de LDC n'a pas d'adversaire : son horodatage est gardé à
+        # la seconde, sans quoi deux rounds finissant le même jour se
+        # confondraient. Les guerres classiques, elles, doivent partager leur
+        # identifiant avec la feuille ``Guerres`` (voir _classic_war_id).
         rows.append({
-            "war_id": f"{clan_tag}|{e.get('endTime')}|{opp.get('tag')}",
+            "war_id": (f"{clan_tag}|{e.get('endTime')}|{opp.get('tag')}" if is_cwl
+                       else _classic_war_id(clan_tag, e.get("endTime"),
+                                            opp.get("tag"))),
             "war_type": "ldc" if is_cwl else "classique",
             "end_time": _iso(e.get("endTime")),
             "result": e.get("result") or ("" if is_cwl else "inconnu"),
@@ -418,49 +557,56 @@ def _warlog_rows(entries: list[dict], clan_tag: str) -> list[dict]:
 # =============================================================================
 
 def collect_members(clan_tag: str, book: Workbook, timestamp: str,
-                    log: Callable = logging.info) -> int:
+                    log: Callable = logging.info) -> tuple[int, int]:
     """Relevé horodaté des membres → feuilles ``Membres`` et ``Clan``.
 
     Les deux feuilles proviennent du **même** appel ``/clans/{tag}`` : le
     relevé du clan (grade de ligue de guerre, effectif, palmarès) ne coûte
-    aucune requête supplémentaire."""
+    aucune requête supplémentaire.
+
+    Chaque relevé porte un horodatage neuf : il n'y a jamais de mise à jour
+    ici, uniquement des ajouts — d'où le second compteur toujours nul."""
     clan = _api(f"/clans/{clan_tag.replace('#', '%23')}")
     if not clan:
         log("⚠ Membres : clan introuvable ou API indisponible.")
-        return 0
+        return 0, 0
     rows = _member_rows(clan, clan_tag, timestamp)
-    added = book.append(SHEET_MEMBERS, rows)
+    added, _ = book.append(SHEET_MEMBERS, rows)
     book.append(SHEET_CLAN, [_clan_row(clan, clan_tag, timestamp)])
     league = (clan.get("warLeague") or {}).get("name", "—")
     log(f"👥 Membres : {len(rows)} relevés ajoutés ({clan.get('name')}, "
         f"ligue de guerre : {league}).")
-    return added
+    return added, 0
 
 
 def collect_current_war(clan_tag: str, book: Workbook,
-                        log: Callable = logging.info) -> int:
+                        log: Callable = logging.info) -> tuple[int, int]:
     """Guerre classique en cours ou tout juste terminée → feuille ``Guerres``.
 
     Seul endpoint donnant le détail par joueur d'une guerre classique : il faut
     donc l'appeler pendant la guerre ou juste après, sans quoi la donnée est
-    définitivement perdue."""
+    définitivement perdue.
+
+    Rappelé pendant une guerre déjà relevée, il ne crée aucune ligne mais
+    réécrit les existantes avec les attaques faites depuis — d'où le compteur
+    de mises à jour retourné à côté des nouveautés."""
     war = _api(f"/clans/{clan_tag.replace('#', '%23')}/currentwar")
     if not war:
         log("⚠ Guerre : journal de guerre privé ou API indisponible.")
-        return 0
+        return 0, 0
     if war.get("state") == "notInWar":
         log("ℹ Guerre : aucune guerre classique en cours.")
-        return 0
+        return 0, 0
 
     rows = _war_rows(war, clan_tag, war_type="classique")
-    added = book.append(SHEET_WARS, rows)
+    added, updated = book.append(SHEET_WARS, rows)
     log(f"⚔ Guerre classique ({war.get('state')}) : {len(rows)} joueurs, "
-        f"{added} nouvelle(s) ligne(s).")
-    return added
+        f"{added} nouvelle(s) ligne(s), {updated} mise(s) à jour.")
+    return added, updated
 
 
 def collect_warlog(clan_tag: str, book: Workbook, limit: int = 50,
-                   log: Callable = logging.info) -> int:
+                   log: Callable = logging.info) -> tuple[int, int]:
     """Historique des guerres au niveau clan → feuille ``JournalClan``.
 
     Rappel : l'API ne fournit **aucun** détail joueur ici, uniquement le score
@@ -469,25 +615,31 @@ def collect_warlog(clan_tag: str, book: Workbook, limit: int = 50,
                 {"limit": limit})
     if not data:
         log("⚠ Journal de guerre : privé ou indisponible (403).")
-        return 0
+        return 0, 0
     rows = _warlog_rows(data.get("items", []), clan_tag)
-    added = book.append(SHEET_WARLOG, rows)
-    log(f"📜 Journal de guerre : {len(rows)} guerres lues, {added} nouvelle(s).")
-    return added
+    added, updated = book.append(SHEET_WARLOG, rows)
+    log(f"📜 Journal de guerre : {len(rows)} guerres lues, {added} nouvelle(s), "
+        f"{updated} mise(s) à jour.")
+    return added, updated
 
 
 def collect_cwl(clan_tag: str, book: Workbook,
-                log: Callable = logging.info) -> tuple[int, int]:
+                log: Callable = logging.info) -> tuple[int, int, int]:
     """Ligue des clans : archive les war tags **puis** collecte chaque round.
 
-    Retourne ``(lignes_guerres_ajoutées, war_tags_archivés)``. L'archivage est
-    le point critique : une fois la saison finie, l'API ne redonnera plus
-    jamais ces tags, alors que ``/clanwarleagues/wars/{warTag}`` continue de
-    répondre. Sans archive, la saison est perdue."""
+    Retourne ``(lignes_ajoutées, lignes_mises_à_jour, war_tags_archivés)``.
+    L'archivage est le point critique : une fois la saison finie, l'API ne
+    redonnera plus jamais ces tags, alors que ``/clanwarleagues/wars/{warTag}``
+    continue de répondre. Sans archive, la saison est perdue.
+
+    Seuls les rounds encore inconnus du classeur sont requêtés ici ; ceux qui
+    y figurent déjà sont l'affaire de :func:`refresh_open_wars`, qui rafraîchit
+    ceux qui ne sont pas terminés et laisse les autres tranquilles. Une passe
+    de surveillance ne demande donc jamais deux fois le même war tag."""
     group = _api(f"/clans/{clan_tag.replace('#', '%23')}/currentwar/leaguegroup")
     if not group:
         log("ℹ LDC : aucune Ligue des clans en cours pour ce clan.")
-        return 0, 0
+        return 0, 0, 0
 
     season = group.get("season", "")
     seen = _now()
@@ -500,17 +652,21 @@ def collect_cwl(clan_tag: str, book: Workbook,
             if wt and wt != _EMPTY_WAR_TAG:
                 tag_rows.append({"season": season, "round": idx, "war_tag": wt,
                                  "clan_tag": clan_tag, "first_seen": seen})
-    archived = book.append(SHEET_CWL_TAGS, tag_rows)
+    archived, _ = book.append(SHEET_CWL_TAGS, tag_rows)
     log(f"🏆 LDC saison {season} ({group.get('state')}) : "
         f"{len(tag_rows)} war tags, {archived} nouveau(x) archivé(s).")
 
-    # 2) Collecte du détail joueur de chaque round.
-    added = _fetch_war_tags(clan_tag, book, tag_rows, log=log)
-    return added, archived
+    # 2) Collecte du détail joueur des rounds encore absents du classeur.
+    connus = set(book.get(SHEET_WARS)
+                 .get("war_tag", pd.Series(dtype=object))
+                 .map(_clean_tag))
+    nouveaux = [r for r in tag_rows if r["war_tag"] not in connus]
+    added, updated = _fetch_war_tags(clan_tag, book, nouveaux, log=log)
+    return added, updated, archived
 
 
 def _fetch_war_tags(clan_tag: str, book: Workbook, tag_rows: list[dict],
-                    log: Callable = logging.info) -> int:
+                    log: Callable = logging.info) -> tuple[int, int]:
     """Requête chaque war tag LDC et empile les lignes joueurs.
 
     Une guerre LDC n'oppose que 2 des 8 clans du groupe : les war tags où le
@@ -531,10 +687,163 @@ def _fetch_war_tags(clan_tag: str, book: Workbook, tag_rows: list[dict],
         rows.extend(_war_rows(war, clan_tag, war_type="ldc",
                               war_tag=wt, season=row.get("season", "")))
 
-    added = book.append(SHEET_WARS, rows)
-    if added:
-        log(f"🏆 LDC : {added} nouvelle(s) ligne(s) joueur ajoutée(s).")
-    return added
+    added, updated = book.append(SHEET_WARS, rows)
+    if added or updated:
+        log(f"🏆 LDC : {added} nouvelle(s) ligne(s) joueur, "
+            f"{updated} mise(s) à jour.")
+    return added, updated
+
+
+# =============================================================================
+# MISE À JOUR DES GUERRES DÉJÀ RELEVÉES
+# =============================================================================
+
+#: Champs du journal de guerre recopiés sur une guerre classique manquée.
+_WARLOG_FINALS = ("result", "clan_stars", "clan_destruction", "opponent_stars",
+                  "opponent_destruction", "opponent_name", "team_size",
+                  "attacks_per_member")
+
+
+def _migrate_war_ids(clan_tag: str, book: Workbook) -> int:
+    """Recale les ``war_id`` classiques hérités du format à la seconde.
+
+    Les classeurs constitués avant :func:`_classic_war_id` portent deux
+    identifiants différents pour une même guerre — celui de ``/currentwar`` et
+    celui du ``/warlog``, décalés d'une seconde — ce qui la faisait compter
+    deux fois dans le rapport et empêchait toute mise à jour croisée. On
+    reconstruit l'identifiant depuis les colonnes de chaque ligne, ce qui les
+    réunit, puis on déduplique.
+
+    Sans effet sur un classeur déjà au bon format. Retourne le nombre de lignes
+    ré-identifiées."""
+    changed = 0
+    for sheet in (SHEET_WARS, SHEET_WARLOG):
+        df = book.get(sheet)
+        if df.empty or not {"war_id", "end_time"} <= set(df.columns):
+            continue
+
+        neufs = []
+        for _, row in df.iterrows():
+            opponent = _clean_tag(row.get("opponent_tag"))
+            # Les lignes de LDC gardent leur identifiant : côté ``Guerres``
+            # c'est le war tag, côté journal un horodatage à la seconde sans
+            # adversaire — dans les deux cas rien à réunir.
+            if str(row.get("war_type")) != "classique" or not opponent:
+                neufs.append(str(row.get("war_id")))
+            else:
+                neufs.append(_classic_war_id(clan_tag, row.get("end_time"),
+                                             opponent))
+
+        serie = pd.Series(neufs, index=df.index)
+        modifiees = int((serie != df["war_id"].astype(str)).sum())
+        if not modifiees:
+            continue
+
+        df = df.copy()
+        df["war_id"] = serie
+        keys = [k for k in _DEDUP_KEYS[sheet] if k in df.columns]
+        book.sheets[sheet] = (df.drop_duplicates(subset=keys, keep="last")
+                                .reset_index(drop=True))
+        book.dirty = True
+        changed += modifiees
+    return changed
+
+
+def _refresh_open_cwl(clan_tag: str, book: Workbook, ouvertes: pd.DataFrame,
+                      log: Callable) -> int:
+    """Re-demande les rounds de LDC du classeur qui ne sont pas terminés.
+
+    ``collect_cwl`` ne voit que la saison en cours. Une saison close dont le
+    dernier round a été relevé en ``inWar`` resterait donc figée alors que
+    ``/clanwarleagues/wars/{warTag}`` répond encore parfaitement."""
+    if "war_tag" not in ouvertes.columns:
+        return 0
+
+    tags: dict[str, str] = {}
+    for _, row in ouvertes.iterrows():
+        war_tag = _clean_tag(row.get("war_tag"))
+        if war_tag and war_tag not in tags:
+            saison = row.get("season")
+            tags[war_tag] = "" if pd.isna(saison) else str(saison)
+    if not tags:
+        return 0
+
+    log(f"🔄 LDC : {len(tags)} round(s) non terminé(s) à rafraîchir…")
+    tag_rows = [{"war_tag": t, "season": s} for t, s in tags.items()]
+    _, updated = _fetch_war_tags(clan_tag, book, tag_rows, log=log)
+    return updated
+
+
+def _backfill_classic_from_warlog(book: Workbook, ouvertes: pd.DataFrame,
+                                  log: Callable) -> int:
+    """Recopie le score final du journal sur les guerres classiques manquées.
+
+    Une guerre relevée en cours puis terminée entre deux surveillances reste
+    bloquée en ``inWar``, sans résultat : ``/currentwar`` est déjà passé à la
+    suivante. Le détail par joueur n'est pas récupérable — il reste celui du
+    dernier relevé, forcément incomplet — mais l'entête de la guerre, elle,
+    peut être corrigée, et c'est ce qui rend le bilan victoires / défaites
+    juste."""
+    journal = book.get(SHEET_WARLOG)
+    guerres = book.get(SHEET_WARS)
+    if journal.empty or guerres.empty or "war_id" not in journal.columns:
+        return 0
+
+    finals = {str(r["war_id"]): r for _, r in journal.iterrows()
+              if str(r.get("war_type")) == "classique"}
+    cibles = [w for w in ouvertes["war_id"].astype(str).unique() if w in finals]
+    if not cibles:
+        return 0
+
+    touchees = 0
+    for war_id in cibles:
+        source = finals[war_id]
+        mask = guerres["war_id"].astype(str) == war_id
+        for column in _WARLOG_FINALS:
+            _assign(guerres, mask, column, source.get(column))
+        _assign(guerres, mask, "state", "warEnded")
+        touchees += int(mask.sum())
+
+    book.sheets[SHEET_WARS] = guerres
+    book.dirty = True
+    log(f"🩹 {len(cibles)} guerre(s) classique(s) terminée(s) hors surveillance : "
+        f"score final repris du journal ({touchees} ligne(s)). Le détail des "
+        f"attaques de ces guerres reste celui du dernier relevé — l'API ne le "
+        f"redonne plus.")
+    return touchees
+
+
+def refresh_open_wars(clan_tag: str, book: Workbook,
+                      log: Callable = logging.info) -> int:
+    """Finalise les guerres du classeur qui ne sont pas encore terminées.
+
+    Les étapes de collecte ne voient que le présent : ``/currentwar`` est déjà
+    passé à la guerre suivante et ``/currentwar/leaguegroup`` ne répond plus
+    une fois la saison close. Sans ce rattrapage, toute ligne relevée en cours
+    de route resterait éternellement dans l'état où on l'a vue — attaques
+    manquantes, état ``inWar``, résultat vide.
+
+    Deux rattrapages, selon ce que l'API accepte encore de donner :
+
+    * **LDC** — le war tag reste requêtable des mois plus tard, le round est
+      donc re-demandé tel qu'il est aujourd'hui, attaques comprises ;
+    * **guerre classique** — le détail joueur est perdu, mais le journal de
+      guerre fournit le score final.
+
+    Retourne le nombre de lignes mises à jour."""
+    guerres = book.get(SHEET_WARS)
+    if guerres.empty or "state" not in guerres.columns:
+        return 0
+
+    ouvertes = guerres[guerres["state"].astype(str) != "warEnded"]
+    if ouvertes.empty:
+        return 0
+
+    updated = _refresh_open_cwl(clan_tag, book, ouvertes, log)
+    # Le journal est relu après coup : ``_refresh_open_cwl`` a pu réécrire la
+    # feuille ``Guerres``, mais jamais les guerres classiques visées ici.
+    updated += _backfill_classic_from_warlog(book, ouvertes, log)
+    return updated
 
 
 def refetch_archived_cwl(clan_tag: str, season: str | None = None,
@@ -558,9 +867,11 @@ def refetch_archived_cwl(clan_tag: str, season: str | None = None,
 
     tag_rows = tags.to_dict("records")
     log(f"🔄 Rattrapage LDC : {len(tag_rows)} war tags à re-requêter…")
-    added = _fetch_war_tags(clan_tag, book, tag_rows, log=log)
+    added, updated = _fetch_war_tags(clan_tag, book, tag_rows, log=log)
     book.save()
-    return added
+    log(f"✅ Rattrapage LDC terminé : {added} nouvelle(s) ligne(s), "
+        f"{updated} mise(s) à jour.")
+    return added + updated
 
 
 # =============================================================================
@@ -585,9 +896,18 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
     log(f"🛰 Surveillance de {clan_tag} → {os.path.basename(path)}")
 
     book = Workbook(path)
+
+    # Avant toute collecte : les lignes déjà présentes doivent porter les mêmes
+    # identifiants que celles qui arrivent, sinon elles ne peuvent pas être
+    # mises à jour et se dupliquent.
+    recalees = _migrate_war_ids(clan_tag, book)
+    if recalees:
+        log(f"🔧 {recalees} ligne(s) de guerre ré-identifiée(s) "
+            f"(ancien format à la seconde).")
+
     resume = {"timestamp": timestamp, "clan_tag": clan_tag,
-              "membres": 0, "guerres": 0, "journal": 0, "war_tags_ldc": 0,
-              "erreurs": ""}
+              "membres": 0, "guerres": 0, "maj_guerres": 0, "journal": 0,
+              "war_tags_ldc": 0, "erreurs": ""}
     erreurs = []
 
     etapes = [
@@ -599,26 +919,39 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
         if not actif:
             continue
         try:
-            resume[cle] = action()
+            nouvelles, maj = action()
+            resume[cle] = nouvelles
+            if cle == "guerres":
+                resume["maj_guerres"] += maj
         except Exception as e:
             erreurs.append(f"{cle}: {e}")
             log(f"❌ Étape « {cle} » en échec : {e}")
 
     if ldc:
         try:
-            lignes, tags = collect_cwl(clan_tag, book, log)
+            lignes, maj, tags = collect_cwl(clan_tag, book, log)
             resume["guerres"] += lignes
+            resume["maj_guerres"] += maj
             resume["war_tags_ldc"] = tags
         except Exception as e:
             erreurs.append(f"ldc: {e}")
             log(f"❌ Étape « ldc » en échec : {e}")
+
+    # Rattrapage final : ce que les étapes ci-dessus ne pouvaient plus voir.
+    if guerre or ldc:
+        try:
+            resume["maj_guerres"] += refresh_open_wars(clan_tag, book, log)
+        except Exception as e:
+            erreurs.append(f"guerres_ouvertes: {e}")
+            log(f"❌ Étape « guerres ouvertes » en échec : {e}")
 
     resume["erreurs"] = " | ".join(erreurs)
     resume["fichier"] = path
     book.append(SHEET_CALLS, [{k: v for k, v in resume.items() if k != "fichier"}])
     book.save()
     log(f"✅ Surveillance terminée : {resume['membres']} membres, "
-        f"{resume['guerres']} lignes de guerre, {resume['journal']} guerres "
+        f"{resume['guerres']} nouvelle(s) ligne(s) de guerre, "
+        f"{resume['maj_guerres']} mise(s) à jour, {resume['journal']} guerres "
         f"au journal.")
     return resume
 
@@ -632,6 +965,9 @@ def derniers_appels(clan_tag: str, n: int = 5) -> list[dict]:
     df = _read_sheet(path, SHEET_CALLS)
     if df.empty or "timestamp" not in df.columns:
         return []
+    # Les exécutions antérieures à une colonne donnée la relisent en ``NaN`` :
+    # l'interface afficherait « nan » là où il n'y a simplement rien eu.
     return (df.sort_values("timestamp", ascending=False)
               .head(n)
+              .fillna("")
               .to_dict("records"))

@@ -14,7 +14,7 @@ Contenu du rapport
    des dates à chaque changement de grade de ligue de guerre.
 2. **Destruction moyenne par joueur** — une ligne par joueur, une guerre par pas
    sur l'axe X, avec sélection des joueurs à afficher (cases à cocher + « Tous »).
-3. **Effectif** et **HDV moyen** du clan dans le temps.
+3. **Effectif** du clan dans le temps.
 4. **Trois tableaux colorés** : synthèse par joueur, détail par guerre
    (attaques / étoiles), et dons par joueur et par mois.
 
@@ -138,7 +138,18 @@ def _build_wars(guerres: pd.DataFrame, journal: pd.DataFrame) -> list[dict]:
     if not journal.empty and "war_type" in journal.columns:
         for _, r in journal[journal["war_type"] == "classique"].iterrows():
             war_id = _txt(r.get("war_id"))
-            if not war_id or war_id in wars:
+            if not war_id:
+                continue
+            known = wars.get(war_id)
+            if known is not None:
+                # Guerre détaillée mais relevée avant sa fin : le journal porte
+                # le score final que ``Guerres`` n'a jamais pu voir. Le détail
+                # par joueur, lui, reste celui du dernier relevé — l'API ne le
+                # redonne plus une fois la guerre passée.
+                if not known["result"]:
+                    known["result"] = _txt(r.get("result"))
+                    known["clan_stars"] = _num(r.get("clan_stars"))
+                    known["opponent_stars"] = _num(r.get("opponent_stars"))
                 continue
             wars[war_id] = {
                 "war_id": war_id,
@@ -409,12 +420,11 @@ def _donations(membres: pd.DataFrame) -> dict:
 
 
 def _roster(membres: pd.DataFrame, clan: pd.DataFrame) -> dict:
-    """Effectif et niveau d'HDV moyen à chaque relevé."""
+    """Effectif du clan à chaque relevé."""
     if membres.empty:
         return {"points": []}
     grouped = membres.groupby("timestamp").agg(
         effectif=("player_tag", "nunique"),
-        hdv=("townhall_level", "mean"),
     ).reset_index().sort_values("timestamp")
 
     points = []
@@ -423,8 +433,7 @@ def _roster(membres: pd.DataFrame, clan: pd.DataFrame) -> dict:
         if ts is None:
             continue
         points.append({"ts": ts, "date": _txt(r["timestamp"])[:10],
-                       "effectif": int(_num(r["effectif"])),
-                       "hdv": round(_num(r["hdv"]), 2)})
+                       "effectif": int(_num(r["effectif"]))})
     return {"points": points}
 
 

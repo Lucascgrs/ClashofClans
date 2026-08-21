@@ -36,9 +36,12 @@ _CALL_COLUMNS = [
     ("timestamp", "Date d'appel", 150),
     ("membres", "Membres", 80),
     ("guerres", "Guerres", 80),
+    # Une guerre déjà relevée n'ajoute aucune ligne mais en modifie beaucoup :
+    # sans cette colonne, un passage utile s'affichait « 0 » partout.
+    ("maj_guerres", "Màj guerres", 100),
     ("journal", "Journal", 80),
     ("war_tags_ldc", "Tags LDC", 80),
-    ("erreurs", "Erreurs", 260),
+    ("erreurs", "Erreurs", 240),
 ]
 
 
