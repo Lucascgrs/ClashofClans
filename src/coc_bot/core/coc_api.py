@@ -30,6 +30,7 @@ import json
 import time
 import pyautogui
 import pyperclip
+from contextlib import contextmanager
 from datetime import datetime
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -52,9 +53,30 @@ from ..paths import (
 # CONFIG
 # =============================================================================
 
+class _TqdmLoggingHandler(logging.StreamHandler):
+    """Handler de log qui écrit via ``tqdm.write``.
+
+    ``logging`` et ``tqdm`` visent tous les deux stderr : sans ce handler,
+    chaque ligne de log tronque la barre de progression en cours et laisse
+    des fragments collés en fin de ligne (« | 0 clans/s:32, 52.60clan/s] »).
+    """
+
+    def __init__(self):
+        super().__init__(stream=sys.stderr)
+
+    def emit(self, record):
+        try:
+            tqdm.write(self.format(record), file=self.stream)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[_TqdmLoggingHandler()],
+    force=True,   # prime sur un basicConfig déjà posé ailleurs (env_setup)
 )
 
 API_TOKEN = get_or_create_token()
@@ -405,12 +427,41 @@ class RateLimiter:
 _rate_limiter = RateLimiter(max_per_second=10)
 
 from typing import Optional
+
+# --- Session HTTP partagée ---------------------------------------------------
+# ``requests.get`` ouvre une connexion TCP + une poignée de main TLS à CHAQUE
+# appel : sur des dizaines de milliers de requêtes avec 10 threads, c'est la
+# première cause des « Read timed out ». On réutilise donc un pool de
+# connexions dimensionné pour les workers.
+HTTP_TIMEOUT = (5, 20)   # (connexion, lecture) — l'API CoC est lente sous charge
+HTTP_POOL_SIZE = 64
+
+
+def _build_session(pool_size: int = HTTP_POOL_SIZE) -> requests.Session:
+    """Crée la session partagée (pool de connexions réutilisables)."""
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=pool_size, pool_maxsize=pool_size, max_retries=0)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_session = _build_session()
+
+
 def safe_get(url: str, headers: dict, params: dict = None, retries: int = 3, delay: int = 2) -> Optional[requests.Response]:
-    """GET HTTP avec rate limiting, gestion 429, retry + backoff exponentiel."""
+    """GET HTTP avec rate limiting, gestion 429, retry + backoff jitté.
+
+    ⚠ Un retour ``None`` signifie ÉCHEC (et non « aucun résultat ») : les
+    appelants doivent le propager pour que le préfixe / le clan concerné soit
+    reprogrammé, sinon on creuse des trous silencieux dans les données.
+    """
     for attempt in range(retries):
         try:
             _rate_limiter.acquire()
-            r = requests.get(url, headers=headers, params=params, timeout=6)
+            r = _session.get(url, headers=headers, params=params,
+                             timeout=HTTP_TIMEOUT)
             if r.status_code == 429:
                 retry_after = int(r.headers.get("Retry-After", delay * (attempt + 1)))
                 logging.warning(f"Rate limit 429 — attente {retry_after}s")
@@ -421,9 +472,15 @@ def safe_get(url: str, headers: dict, params: dict = None, retries: int = 3, del
         except requests.exceptions.HTTPError:
             raise
         except Exception as e:
-            logging.warning(f"Tentative {attempt + 1}/{retries} échouée: {e}")
-            time.sleep(delay * (attempt + 1))
-    logging.error("Abandon après plusieurs erreurs.")
+            if attempt == retries - 1:
+                logging.error(f"Abandon après {retries} tentatives : {e}")
+                return None
+            # Backoff exponentiel + jitter : sans le jitter, les threads
+            # repartent tous en même temps et re-saturent l'API.
+            wait = delay * (2 ** attempt) * (0.5 + random.random())
+            logging.warning(f"Tentative {attempt + 1}/{retries} échouée: {e} "
+                            f"— nouvelle tentative dans {wait:.1f}s")
+            time.sleep(wait)
     return None
 
 
@@ -453,14 +510,69 @@ def _read_data(file_path: str) -> pd.DataFrame:
             return pd.DataFrame()
 
 
+# Un verrou par fichier de données : sérialise les cycles
+# lecture → fusion → écriture pour que deux tâches (scan, orchestrateur…)
+# ne s'écrasent jamais mutuellement.
+_DATA_LOCKS       = {}
+_DATA_LOCKS_GUARD = threading.Lock()
+
+
+def _data_lock(file_path: str) -> threading.RLock:
+    """Retourne le verrou associé à un fichier de données (créé à la volée)."""
+    key = os.path.abspath(_data_path(file_path))
+    with _DATA_LOCKS_GUARD:
+        lock = _DATA_LOCKS.get(key)
+        if lock is None:
+            lock = _DATA_LOCKS[key] = threading.RLock()
+    return lock
+
+
 def _write_data(file_path: str, df: pd.DataFrame):
     """
-    Écrit les données dans le fichier .parquet associé.
+    Écrit les données dans le fichier .parquet associé — de façon ATOMIQUE.
     Rapide même sur 500k+ lignes.
+
+    L'écriture passe par un fichier temporaire suivi d'un ``os.replace`` :
+    une interruption en plein write (arrêt d'urgence, crash, coupure) laisse
+    l'ancien parquet intact au lieu d'un fichier tronqué illisible.
     """
     path = _data_path(file_path)
+    tmp  = f"{path}.{os.getpid()}.tmp"
     with Timer(f"écriture parquet {os.path.basename(path)} ({len(df)} lignes)"):
-        df.to_parquet(path, index=False)
+        try:
+            df.to_parquet(tmp, index=False)
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            raise
+
+
+def _merge_rows(file_path: str, rows: list, key_col: str) -> int:
+    """Fusionne ``rows`` dans le parquet : relecture → concat → dédoublonnage
+    sur ``key_col`` → écriture atomique, le tout sous verrou.
+
+    C'est ce qui remplace l'ancien schéma « je garde tout en mémoire et je
+    réécris le fichier entier à la fin » : ce dernier perdait la totalité du
+    scan à la moindre interruption, et deux scans simultanés se supprimaient
+    mutuellement leurs lignes (le dernier à finir gagnait).
+
+    Retourne le nombre total de lignes du fichier après fusion.
+    """
+    with _data_lock(file_path):
+        current  = _read_data(file_path)
+        new_df   = pd.DataFrame(rows) if rows else pd.DataFrame()
+        if new_df.empty:
+            return len(current)
+        combined = (pd.concat([current, new_df], ignore_index=True)
+                    if not current.empty else new_df)
+        if key_col in combined.columns:
+            combined = combined.drop_duplicates(subset=[key_col], keep="first")
+        _write_data(file_path, combined)
+        return len(combined)
 
 
 def _excel_read_sheet(file_path: str, sheet_name: str) -> pd.DataFrame:
@@ -510,18 +622,102 @@ def export_to_excel_in_chunks(file_path: str, max_rows: int = 1048576):
 # GESTION DE LA PROGRESSION (_meta stocké dans le xlsx)
 # =============================================================================
 
+def _meta_path(file_path: str) -> str:
+    """Chemin du JSON de métadonnées associé (source de vérité)."""
+    return _data_path(file_path).replace(".parquet", ".meta.json")
+
+
 def _load_meta(file_path: str) -> dict:
-    """Charge le dict de métadonnées depuis la feuille _meta. Retourne {} si absent."""
+    """Charge les métadonnées : JSON en priorité, ancienne feuille _meta sinon."""
+    path = _meta_path(file_path)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception as e:
+            logging.error(f"Erreur lecture meta {path}: {e}")
     df = _excel_read_sheet(file_path, META_SHEET)
     if df.empty or "key" not in df.columns:
         return {}
     return dict(zip(df["key"], df["value"]))
 
 
-def _save_meta(file_path: str, meta: dict):
-    """Sauvegarde le dict de métadonnées dans la feuille _meta du xlsx."""
-    df = pd.DataFrame(list(meta.items()), columns=["key", "value"])
-    _excel_write_sheet(file_path, META_SHEET, df)
+def _save_meta(file_path: str, meta: dict, mirror: bool = True):
+    """Sauvegarde les métadonnées.
+
+    Le JSON est la source de vérité (écriture atomique, toujours disponible) ;
+    la feuille ``_meta`` du xlsx n'est plus qu'un miroir lisible à la main,
+    écrit au mieux. L'ancien schéma perdait le curseur de progression dès que
+    le classeur était ouvert dans Excel/LibreOffice au moment de la sauvegarde.
+    """
+    clean = {}
+    for k, v in meta.items():
+        if isinstance(v, float) and pd.isna(v):
+            v = None
+        clean[str(k)] = v
+
+    path = _meta_path(file_path)
+    tmp  = f"{path}.tmp"
+    with _data_lock(file_path):
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(clean, f, ensure_ascii=False, indent=2, default=str)
+        os.replace(tmp, path)
+
+    if mirror:
+        try:
+            df = pd.DataFrame(list(clean.items()), columns=["key", "value"])
+            _excel_write_sheet(file_path, META_SHEET, df)
+        except Exception as e:
+            logging.debug(f"Miroir _meta xlsx indisponible ({e}) — JSON à jour.")
+
+
+def _update_meta(file_path: str, updates: dict, mirror: bool = False) -> dict:
+    """Fusionne ``updates`` dans les métadonnées existantes.
+
+    L'ancien code réécrivait le dict complet : sauvegarder le curseur d'un pays
+    effaçait celui de tous les autres.
+    """
+    with _data_lock(file_path):
+        meta = _load_meta(file_path)
+        meta.update(updates)
+        _save_meta(file_path, meta, mirror=mirror)
+        return meta
+
+
+# =============================================================================
+# EXCLUSIVITÉ DES SCANS
+# =============================================================================
+
+class ScanAlreadyRunning(RuntimeError):
+    """Levée quand un scan du même type tourne déjà."""
+
+
+_SCAN_GUARDS      = {}
+_SCAN_GUARDS_LOCK = threading.Lock()
+
+
+@contextmanager
+def _exclusive(name: str):
+    """Interdit deux exécutions simultanées du scan ``name``.
+
+    Deux scans en parallèle doublaient la charge sur l'API (d'où les
+    « Read timed out » en rafale), refaisaient le même travail, et s'écrasaient
+    mutuellement à l'écriture du parquet.
+    """
+    with _SCAN_GUARDS_LOCK:
+        lock = _SCAN_GUARDS.setdefault(name, threading.Lock())
+    if not lock.acquire(blocking=False):
+        raise ScanAlreadyRunning(
+            f"Un scan « {name} » est déjà en cours. Deux scans simultanés "
+            f"doublent la charge API et s'écrasent à l'écriture — "
+            f"attends la fin du scan en cours (ou utilise l'arrêt d'urgence)."
+        )
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 # =============================================================================
@@ -562,15 +758,21 @@ def _extract_clan_row(clan: dict, timestamp: str) -> dict:
 
 
 def _fetch_clans_for_prefix(prefix: str, page_size: int,
-                             location_id: int) -> tuple[str, list[dict], int]:
+                             location_id: int) -> tuple:
     """
     Récupère TOUS les clans pour un préfixe donné (toutes les pages).
-    Retourne (prefix, clans, nb_requêtes) pour les stats de chrono.
+    Retourne (prefix, clans, nb_requêtes, ok) pour les stats de chrono.
     Conçu pour être appelé depuis un thread.
+
+    ``ok=False`` signale un résultat PARTIEL (API en échec) : l'appelant doit
+    reprogrammer le préfixe au lieu de le marquer comme traité — sinon les
+    clans de ce préfixe sont perdus silencieusement et le curseur avance
+    quand même.
     """
     clans    = []
     cursor   = None
     nb_reqs  = 0
+    ok       = True
     t_start  = time.perf_counter()
 
     while True:
@@ -583,6 +785,7 @@ def _fetch_clans_for_prefix(prefix: str, page_size: int,
         r = safe_get(f"{API_URL}/clans", HEADERS, params)
         nb_reqs += 1
         if not r:
+            ok = False          # échec réseau → préfixe incomplet
             break
 
         data   = r.json()
@@ -593,7 +796,26 @@ def _fetch_clans_for_prefix(prefix: str, page_size: int,
 
     elapsed = time.perf_counter() - t_start
     logging.debug(f"[prefix={prefix}] {len(clans)} clans en {nb_reqs} req / {elapsed:.2f}s")
-    return prefix, clans, nb_reqs
+    return prefix, clans, nb_reqs, ok
+
+
+#: Nombre maximum de préfixes en attente de reprise conservés dans _meta.
+MAX_RETRY_PREFIXES = 2000
+
+
+def _clan_cursor_key(location_id) -> str:
+    """Clé _meta du curseur de reprise — UN CURSEUR PAR PAYS.
+
+    L'ancien curseur unique (``last_prefix``) était partagé par tous les pays :
+    dans une boucle multi-pays, le 2ᵉ pays reprenait là où le 1ᵉʳ s'était
+    arrêté, et n'était donc jamais balayé depuis 'AAA'.
+    """
+    return f"next_prefix_{location_id or 'world'}"
+
+
+def _clan_retry_key(location_id) -> str:
+    """Clé _meta des préfixes restés incomplets, à repasser au prochain scan."""
+    return f"retry_prefixes_{location_id or 'world'}"
 
 
 def scan_clans_incremental(max_new_clans: int = 1000,
@@ -602,7 +824,9 @@ def scan_clans_incremental(max_new_clans: int = 1000,
                            location_id: int = None,
                            max_workers: int = 10,
                            batch_size: int = 50,
-                           progress_callback=None) -> pd.DataFrame:
+                           progress_callback=None,
+                           stop_event=None,
+                           save_every: int = 10) -> pd.DataFrame:
     """
     Scan incrémental de clans — version parallélisée par batch.
 
@@ -613,70 +837,118 @@ def scan_clans_incremental(max_new_clans: int = 1000,
       - location_id   : filtrer par pays (None = monde entier)
       - max_workers   : threads simultanés (≤ max_per_second du rate limiter)
       - batch_size    : préfixes soumis à la fois
+      - stop_event    : ``threading.Event`` — arrêt propre entre deux batchs
+      - save_every    : sauvegarde incrémentale tous les N batchs
+
+    Garanties :
+      - un seul scan de clans à la fois (``ScanAlreadyRunning`` sinon) ;
+      - curseur de reprise par pays, avec rebouclage sur 'AAA' en fin de cycle ;
+      - les préfixes en échec réseau repassent en file (aucun trou silencieux) ;
+      - sauvegardes incrémentales : une interruption ne perd que le dernier lot.
     """
-    with Timer("scan_clans_incremental total"):
+    with _exclusive("scan_clans"), Timer("scan_clans_incremental total"):
+
+        cursor_key = _clan_cursor_key(location_id)
+        retry_key  = _clan_retry_key(location_id)
 
         # ── Chargement ────────────────────────────────────────────────────────
         with Timer("chargement données existantes (parquet + meta)"):
             existing_df = _read_data(file_path)
             meta        = _load_meta(file_path)
 
-        last_prefix  = meta.get("last_prefix", "AAA")
-        known_tags   = set(existing_df["tag"].tolist()) if not existing_df.empty else set()
+        known_tags   = (set(existing_df["tag"].dropna().tolist())
+                        if not existing_df.empty and "tag" in existing_df.columns
+                        else set())
         all_prefixes = _all_prefixes_3()
 
+        start_prefix = str(meta.get(cursor_key) or "AAA").upper()
         try:
-            start_idx = all_prefixes.index(last_prefix)
+            start_idx = all_prefixes.index(start_prefix)
         except ValueError:
-            start_idx = 0
+            start_idx, start_prefix = 0, all_prefixes[0]
 
-        remaining_prefixes = all_prefixes[start_idx:]
-        new_rows           = []
-        fetched            = 0
-        total_reqs         = 0
-        timestamp          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # FIX 2 : on sauvegarde le dernier préfixe du batch (pas le dernier future reçu)
-        last_saved_prefix  = last_prefix
-        lock               = threading.Lock()
+        # Liste TOURNANTE : on repart du curseur, on va jusqu'à 'ZZZ' puis on
+        # reboucle sur 'AAA'. L'ancienne version tronquait la liste
+        # (``all_prefixes[start_idx:]``) : une fois le curseur arrivé à 'ZZZ',
+        # tous les scans suivants ne balayaient plus qu'un seul préfixe.
+        rotated = all_prefixes[start_idx:] + all_prefixes[:start_idx]
+
+        # Préfixes restés incomplets lors d'un run précédent : repassés en
+        # priorité, sans faire avancer le curseur.
+        pending     = [p for p in str(meta.get(retry_key) or "").split(",") if p]
+        pending_set = set(pending)
+        queue       = ([(p, True) for p in pending] +
+                       [(p, False) for p in rotated if p not in pending_set])
+
+        new_rows     = []
+        fetched      = 0
+        saved        = 0
+        total_reqs   = 0
+        failed_total = 0
+        timestamp    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        next_cursor  = start_prefix
+        lock         = threading.Lock()
+        interrupted  = False
 
         logging.info(
-            f"[scan_clans] Reprise depuis préfixe={last_prefix!r} | "
-            f"Clans connus: {len(known_tags)} | Objectif: +{max_new_clans} | "
-            f"Workers: {max_workers} | Batch: {batch_size} | "
-            f"Préfixes restants: {len(remaining_prefixes)}"
+            f"[scan_clans] Reprise depuis préfixe={start_prefix!r} "
+            f"(pays={location_id or 'monde'}) | Clans connus: {len(known_tags)} | "
+            f"Objectif: +{max_new_clans} | Workers: {max_workers} | "
+            f"Batch: {batch_size} | À repasser: {len(pending)} préfixes"
         )
+
+        def flush(final: bool = False):
+            """Enregistre le lot courant + le curseur (atomique, sous verrou)."""
+            nonlocal new_rows, saved
+            if new_rows:
+                total_rows = _merge_rows(file_path, new_rows, "tag")
+                saved     += len(new_rows)
+                new_rows   = []
+                logging.info(f"[scan_clans] 💾 {saved} clans enregistrés | "
+                             f"fichier: {total_rows} lignes")
+            _update_meta(file_path, {
+                cursor_key: next_cursor,
+                retry_key : ",".join(sorted(pending_set)[:MAX_RETRY_PREFIXES]),
+            }, mirror=final)
 
         t_scan_start = time.perf_counter()
 
         with tqdm(total=max_new_clans, desc="Scan clans",
                   unit="clan", dynamic_ncols=True) as pbar:
 
-            for batch_start in range(0, len(remaining_prefixes), batch_size):
+            for batch_start in range(0, len(queue), batch_size):
                 if fetched >= max_new_clans:
                     break
+                if stop_event is not None and stop_event.is_set():
+                    interrupted = True
+                    break
 
-                batch         = remaining_prefixes[batch_start: batch_start + batch_size]
-                # FIX 2 : le dernier préfixe du batch = borne de reprise fiable
-                batch_last_prefix = batch[-1]
+                batch         = queue[batch_start: batch_start + batch_size]
+                prefixes      = [p for p, _ in batch]
                 t_batch       = time.perf_counter()
-                batch_fetched = 0  # FIX 1 : compteur local au batch
+                batch_fetched = 0      # compteur local au batch
+                batch_failed  = []
 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(
                             _fetch_clans_for_prefix, prefix, page_size, location_id
                         ): prefix
-                        for prefix in batch
+                        for prefix in prefixes
                     }
 
                     for future in as_completed(futures):
                         try:
-                            prefix, clans, nb_reqs = future.result()
+                            prefix, clans, nb_reqs, ok = future.result()
                             total_reqs += nb_reqs
                         except Exception as e:
                             prefix = futures[future]
                             logging.error(f"Erreur préfixe {prefix}: {e}")
+                            batch_failed.append(prefix)
                             continue
+
+                        if not ok:
+                            batch_failed.append(prefix)
 
                         with lock:
                             for clan in clans:
@@ -690,18 +962,32 @@ def scan_clans_incremental(max_new_clans: int = 1000,
                                     if progress_callback:
                                         progress_callback(min(fetched, max_new_clans), max_new_clans)
 
-                # FIX 1 : vérification APRÈS le batch complet → respect de max_new_clans
-                # FIX 2 : on enregistre le dernier préfixe du batch entier (déterministe)
-                last_saved_prefix = batch_last_prefix
+                # Les préfixes complets sortent de la file de reprise, les
+                # incomplets y entrent. Le curseur, lui, avance jusqu'au dernier
+                # préfixe « normal » du batch (les reprises n'y touchent pas).
+                failed = set(batch_failed)
+                pending_set.difference_update(p for p in prefixes if p not in failed)
+                pending_set.update(failed)
+                failed_total += len(failed)
 
+                normals = [p for p, is_retry in batch if not is_retry]
+                if normals:
+                    idx = all_prefixes.index(normals[-1])
+                    next_cursor = all_prefixes[(idx + 1) % len(all_prefixes)]
+
+                batch_no      = batch_start // batch_size + 1
                 batch_elapsed = time.perf_counter() - t_batch
                 logging.info(
-                    f"[scan_clans] Batch {batch_start // batch_size + 1} "
-                    f"(préfixes {batch[0]!r}→{batch[-1]!r}) | "
+                    f"[scan_clans] Batch {batch_no} "
+                    f"(préfixes {prefixes[0]!r}→{prefixes[-1]!r}) | "
                     f"+{batch_fetched} clans ce batch | total={fetched} | "
                     f"{batch_elapsed:.2f}s | {total_reqs} req | "
-                    f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.0f} clans/s"
+                    f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.2f} clans/s"
+                    + (f" | ⚠ {len(failed)} préfixe(s) à repasser" if failed else "")
                 )
+
+                if batch_no % save_every == 0:
+                    flush()
 
                 if fetched >= max_new_clans:
                     logging.info(
@@ -710,34 +996,26 @@ def scan_clans_incremental(max_new_clans: int = 1000,
                     )
                     break
 
+        flush(final=True)
+
         scan_elapsed = time.perf_counter() - t_scan_start
         logging.info(
-            f"[scan_clans] Scan terminé | {fetched} nouveaux clans | "
-            f"{total_reqs} requêtes | {scan_elapsed:.2f}s | "
-            f"{fetched / max(scan_elapsed, 0.01):.0f} clans/s moy."
+            f"[scan_clans] Scan {'interrompu' if interrupted else 'terminé'} | "
+            f"{fetched} nouveaux clans | {total_reqs} requêtes | "
+            f"{failed_total} préfixe(s) en échec | {scan_elapsed:.2f}s | "
+            f"{fetched / max(scan_elapsed, 0.01):.2f} clans/s moy."
         )
+        if pending_set:
+            logging.warning(
+                f"[scan_clans] {len(pending_set)} préfixe(s) incomplets — "
+                f"ils seront repassés en priorité au prochain scan."
+            )
 
-        # ── Fusion & sauvegarde ───────────────────────────────────────────────
-        new_df      = pd.DataFrame(new_rows) if new_rows else pd.DataFrame()
-        combined_df = (
-            pd.concat([existing_df, new_df], ignore_index=True)
-            if not existing_df.empty and not new_df.empty else
-            new_df if not new_df.empty else existing_df
-        )
-
-        if not combined_df.empty:
-            _write_data(file_path, combined_df)
-
-        with Timer("sauvegarde meta (xlsx)"):
-            _save_meta(file_path, {
-                "last_prefix": last_saved_prefix,
-                "last_cursor": "",
-            })
-
+        combined_df = _read_data(file_path)
         logging.info(
-            f"[scan_clans] ✅ +{len(new_rows)} nouveaux clans | "
-            f"Total: {len(combined_df)} | "
-            f"Dernier préfixe: {last_saved_prefix!r}"
+            f"[scan_clans] ✅ +{fetched} nouveaux clans | "
+            f"Total: {len(combined_df)} | Prochain préfixe: {next_cursor!r} "
+            f"(pays={location_id or 'monde'})"
         )
 
     return combined_df
@@ -802,8 +1080,13 @@ def filter_player(m: dict) -> bool:
 
 
 def _get_clan_members_paged(clan_tag: str, page_size: int = 100,
-                             after_cursor: str = None) -> tuple[list[dict], str]:
-    """Récupère une page de membres d'un clan. Retourne (membres, next_cursor)."""
+                             after_cursor: str = None) -> tuple:
+    """Récupère une page de membres d'un clan.
+
+    Retourne (membres, next_cursor, ok). ``ok=False`` = échec API — à ne pas
+    confondre avec « clan vide », sinon le clan est marqué comme traité alors
+    qu'aucun de ses joueurs n'a été récupéré.
+    """
     tag_enc = clan_tag.replace("#", "%23")
     params  = {"limit": page_size}
     if after_cursor:
@@ -811,28 +1094,35 @@ def _get_clan_members_paged(clan_tag: str, page_size: int = 100,
 
     r = safe_get(f"{API_URL}/clans/{tag_enc}/members", HEADERS, params)
     if not r:
-        return [], None
+        return [], None, False
 
     data = r.json()
-    return data.get("items", []), data.get("paging", {}).get("cursors", {}).get("after")
+    return (data.get("items", []),
+            data.get("paging", {}).get("cursors", {}).get("after"),
+            True)
 
 
 def _fetch_members_for_clan(clan_tag: str, page_size: int,
-                             condition: bool) -> tuple[str, list[dict], int]:
+                             condition: bool) -> tuple:
     """
     Récupère tous les membres d'un clan (toutes les pages).
-    Retourne (clan_tag, membres, nb_requêtes) pour les stats de chrono.
+    Retourne (clan_tag, membres, nb_requêtes, ok) pour les stats de chrono.
     Conçu pour être appelé depuis un thread.
     """
     members   = []
     cursor    = None
     nb_reqs   = 0
+    ok        = True
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     t_start   = time.perf_counter()
 
     while True:
-        page, next_cur = _get_clan_members_paged(clan_tag, page_size, cursor)
+        page, next_cur, page_ok = _get_clan_members_paged(clan_tag, page_size, cursor)
         nb_reqs += 1
+
+        if not page_ok:
+            ok = False          # échec réseau → clan incomplet
+            break
 
         for m in page:
             if condition and not filter_player(m):
@@ -845,7 +1135,11 @@ def _fetch_members_for_clan(clan_tag: str, page_size: int,
 
     elapsed = time.perf_counter() - t_start
     logging.debug(f"[clan={clan_tag}] {len(members)} membres en {nb_reqs} req / {elapsed:.2f}s")
-    return clan_tag, members, nb_reqs
+    return clan_tag, members, nb_reqs, ok
+
+
+#: Nombre maximum de clans en attente de reprise conservés dans _meta.
+MAX_RETRY_CLANS = 2000
 
 
 def scan_players_incremental(max_new_players: int = 2000,
@@ -855,11 +1149,16 @@ def scan_players_incremental(max_new_players: int = 2000,
                              players_file: str = FILE_ALL_PLAYERS,
                              max_workers: int = 10,
                              batch_size: int = 50,
-                             progress_callback=None) -> pd.DataFrame:
+                             progress_callback=None,
+                             stop_event=None,
+                             save_every: int = 10) -> pd.DataFrame:
     """
     Scan incrémental de joueurs — version parallélisée par batch.
+
+    Mêmes garanties que :func:`scan_clans_incremental` : exclusivité, curseur
+    qui reboucle, clans en échec remis en file, sauvegardes incrémentales.
     """
-    with Timer("scan_players_incremental total"):
+    with _exclusive("scan_players"), Timer("scan_players_incremental total"):
 
         with Timer("chargement clans source (parquet)"):
             clans_df = _read_data(clans_file)
@@ -872,59 +1171,109 @@ def scan_players_incremental(max_new_players: int = 2000,
             return pd.DataFrame()
 
         with Timer("chargement joueurs existants (parquet + meta)"):
-            existing_df   = _read_data(players_file)
-            meta          = _load_meta(players_file)
+            existing_df = _read_data(players_file)
+            meta        = _load_meta(players_file)
 
-        clan_tags     = clans_df["tag"].dropna().tolist()
-        last_clan_idx = int(meta.get("last_clan_idx", 0))
-        known_tags    = set(existing_df["player_tag"].tolist()) if not existing_df.empty else set()
-        remaining     = clan_tags[last_clan_idx:]
+        clan_tags  = clans_df["tag"].dropna().tolist()
+        known_tags = (set(existing_df["player_tag"].dropna().tolist())
+                      if not existing_df.empty and "player_tag" in existing_df.columns
+                      else set())
 
-        new_rows       = []
-        fetched        = 0
-        total_reqs     = 0
-        # FIX 2 : on sauvegarde l'index du dernier clan du batch (déterministe)
-        last_saved_idx = last_clan_idx
-        lock           = threading.Lock()
+        # Reprise par TAG plutôt que par index : la liste des clans grandit à
+        # chaque scan de clans, un index seul finit par désigner un autre clan.
+        # Le tag stocké est le PROCHAIN clan à traiter (pas le dernier traité) —
+        # sinon un clan est sauté à chaque reprise. ``last_clan_idx`` (ancienne
+        # clé, même sémantique d'index de départ) reste le repli.
+        next_tag_meta = meta.get("next_clan_tag")
+        fallback_idx  = int(meta.get("next_clan_idx",
+                                     meta.get("last_clan_idx", 0)) or 0)
+        try:
+            start_idx = (clan_tags.index(next_tag_meta) if next_tag_meta
+                         else fallback_idx)
+        except ValueError:
+            start_idx = fallback_idx
+        start_idx = max(0, min(start_idx, len(clan_tags) - 1))
+
+        # Liste tournante : arrivé au bout, on reboucle au lieu de ne plus rien
+        # scanner (les clans déjà vus ne coûtent que le dédoublonnage).
+        rotated = clan_tags[start_idx:] + clan_tags[:start_idx]
+
+        pending     = [t for t in str(meta.get("retry_clans") or "").split(",") if t]
+        pending_set = set(pending)
+        queue       = ([(t, True) for t in pending] +
+                       [(t, False) for t in rotated if t not in pending_set])
+
+        new_rows     = []
+        fetched      = 0
+        saved        = 0
+        total_reqs   = 0
+        failed_total = 0
+        next_idx     = start_idx
+        next_tag     = clan_tags[start_idx] if clan_tags else None
+        lock         = threading.Lock()
+        interrupted  = False
 
         logging.info(
-            f"[scan_players] Reprise depuis clan index={last_clan_idx} "
-            f"({clan_tags[last_clan_idx] if last_clan_idx < len(clan_tags) else '?'}) | "
-            f"Joueurs connus: {len(known_tags)} | Objectif: +{max_new_players} | "
-            f"Clans restants: {len(remaining)} | Workers: {max_workers} | Batch: {batch_size}"
+            f"[scan_players] Reprise depuis clan index={start_idx} "
+            f"({next_tag}) | Joueurs connus: {len(known_tags)} | "
+            f"Objectif: +{max_new_players} | Clans en file: {len(queue)} | "
+            f"Workers: {max_workers} | Batch: {batch_size} | "
+            f"À repasser: {len(pending)} clans"
         )
+
+        def flush(final: bool = False):
+            """Enregistre le lot courant + le curseur (atomique, sous verrou)."""
+            nonlocal new_rows, saved
+            if new_rows:
+                total_rows = _merge_rows(players_file, new_rows, "player_tag")
+                saved     += len(new_rows)
+                new_rows   = []
+                logging.info(f"[scan_players] 💾 {saved} joueurs enregistrés | "
+                             f"fichier: {total_rows} lignes")
+            _update_meta(players_file, {
+                "next_clan_idx": next_idx,
+                "next_clan_tag": next_tag,
+                "retry_clans"  : ",".join(sorted(pending_set)[:MAX_RETRY_CLANS]),
+            }, mirror=final)
 
         t_scan_start = time.perf_counter()
 
         with tqdm(total=max_new_players, desc="Scan joueurs",
                   unit="joueur", dynamic_ncols=True) as pbar:
 
-            for batch_start in range(0, len(remaining), batch_size):
+            for batch_start in range(0, len(queue), batch_size):
                 if fetched >= max_new_players:
                     break
+                if stop_event is not None and stop_event.is_set():
+                    interrupted = True
+                    break
 
-                batch             = remaining[batch_start: batch_start + batch_size]
-                # FIX 2 : borne de reprise = dernier index du batch (déterministe)
-                batch_last_idx    = last_clan_idx + batch_start + len(batch) - 1
-                t_batch           = time.perf_counter()
-                batch_fetched     = 0  # FIX 1 : compteur local au batch
+                batch         = queue[batch_start: batch_start + batch_size]
+                tags          = [t for t, _ in batch]
+                t_batch       = time.perf_counter()
+                batch_fetched = 0      # compteur local au batch
+                batch_failed  = []
 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = {
                         executor.submit(
                             _fetch_members_for_clan, tag, page_size, condition
-                        ): (last_clan_idx + batch_start + i, tag)
-                        for i, tag in enumerate(batch)
+                        ): tag
+                        for tag in tags
                     }
 
                     for future in as_completed(futures):
-                        idx, clan_tag = futures[future]
+                        clan_tag = futures[future]
                         try:
-                            _, members, nb_reqs = future.result()
+                            _, members, nb_reqs, ok = future.result()
                             total_reqs += nb_reqs
                         except Exception as e:
                             logging.error(f"Erreur clan {clan_tag}: {e}")
+                            batch_failed.append(clan_tag)
                             continue
+
+                        if not ok:
+                            batch_failed.append(clan_tag)
 
                         with lock:
                             for row in members:
@@ -938,17 +1287,32 @@ def scan_players_incremental(max_new_players: int = 2000,
                                     if progress_callback:
                                         progress_callback(min(fetched, max_new_players), max_new_players)
 
-                # FIX 2 : enregistrement après le batch complet
-                last_saved_idx = batch_last_idx
+                failed = set(batch_failed)
+                pending_set.difference_update(t for t in tags if t not in failed)
+                pending_set.update(failed)
+                failed_total += len(failed)
 
+                normals = [t for t, is_retry in batch if not is_retry]
+                if normals:
+                    try:
+                        idx      = clan_tags.index(normals[-1])
+                        next_idx = (idx + 1) % len(clan_tags)
+                        next_tag = clan_tags[next_idx]
+                    except ValueError:
+                        pass
+
+                batch_no      = batch_start // batch_size + 1
                 batch_elapsed = time.perf_counter() - t_batch
                 logging.info(
-                    f"[scan_players] Batch {batch_start // batch_size + 1} "
-                    f"({len(batch)} clans) | "
+                    f"[scan_players] Batch {batch_no} ({len(batch)} clans) | "
                     f"+{batch_fetched} joueurs ce batch | total={fetched} | "
                     f"{batch_elapsed:.2f}s | {total_reqs} req | "
-                    f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.0f} joueurs/s"
+                    f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.2f} joueurs/s"
+                    + (f" | ⚠ {len(failed)} clan(s) à repasser" if failed else "")
                 )
+
+                if batch_no % save_every == 0:
+                    flush()
 
                 if fetched >= max_new_players:
                     logging.info(
@@ -957,34 +1321,25 @@ def scan_players_incremental(max_new_players: int = 2000,
                     )
                     break
 
+        flush(final=True)
+
         scan_elapsed = time.perf_counter() - t_scan_start
         logging.info(
-            f"[scan_players] Scan terminé | {fetched} nouveaux joueurs | "
-            f"{total_reqs} requêtes | {scan_elapsed:.2f}s | "
-            f"{fetched / max(scan_elapsed, 0.01):.0f} joueurs/s moy."
+            f"[scan_players] Scan {'interrompu' if interrupted else 'terminé'} | "
+            f"{fetched} nouveaux joueurs | {total_reqs} requêtes | "
+            f"{failed_total} clan(s) en échec | {scan_elapsed:.2f}s | "
+            f"{fetched / max(scan_elapsed, 0.01):.2f} joueurs/s moy."
         )
+        if pending_set:
+            logging.warning(
+                f"[scan_players] {len(pending_set)} clan(s) incomplets — "
+                f"ils seront repassés en priorité au prochain scan."
+            )
 
-        # ── Fusion & sauvegarde ───────────────────────────────────────────────
-        new_df      = pd.DataFrame(new_rows) if new_rows else pd.DataFrame()
-        combined_df = (
-            pd.concat([existing_df, new_df], ignore_index=True)
-            if not existing_df.empty and not new_df.empty else
-            new_df if not new_df.empty else existing_df
-        )
-
-        if not combined_df.empty:
-            _write_data(players_file, combined_df)
-
-        with Timer("sauvegarde meta (xlsx)"):
-            _save_meta(players_file, {
-                "last_clan_idx"     : last_saved_idx,
-                "last_member_cursor": "",
-            })
-
+        combined_df = _read_data(players_file)
         logging.info(
-            f"[scan_players] ✅ +{len(new_rows)} nouveaux joueurs | "
-            f"Total: {len(combined_df)} | "
-            f"Dernier clan index: {last_saved_idx}"
+            f"[scan_players] ✅ +{fetched} nouveaux joueurs | "
+            f"Total: {len(combined_df)} | Prochain clan: {next_tag} (index {next_idx})"
         )
 
     return combined_df

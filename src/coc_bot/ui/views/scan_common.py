@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import tkinter as tk
 from tkinter import messagebox
 
@@ -40,6 +41,11 @@ FILTER_KEYS = ("min_townhall", "min_xp", "min_donations",
 
 # Libellé « pas de filtre de grade ».
 NO_LEAGUE = "(Aucun)"
+
+# Libellés des boutons de scan (restaurés en fin d'exécution).
+_BTN_PLAYERS = "Lancer Scan Joueurs"
+_BTN_CLANS   = "Lancer Scan Clans"
+_BTN_RUNNING = "Scan en cours…"
 
 # Liste de repli des ligues (classiques, ordonnées) si leagues.json est absent.
 # Le bouton « MAJ Ligues (API) » remplace cette liste par la liste réelle et à
@@ -200,14 +206,18 @@ class IncrementalScanPanel(ctk.CTkFrame):
         scan.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         s1 = ctk.CTkFrame(scan.body, fg_color="transparent")
         s1.grid(row=0, column=0, sticky="ew", pady=2)
-        ctk.CTkButton(s1, text="Lancer Scan Joueurs", width=180,
-                      command=self.run_player_scan).pack(side="left", padx=(0, theme.PAD_S))
+        # Boutons mémorisés : ils sont verrouillés pendant le scan (deux scans
+        # simultanés doublent la charge API et s'écrasent à l'écriture).
+        self.btn_players = ctk.CTkButton(s1, text=_BTN_PLAYERS, width=180,
+                                         command=self.run_player_scan)
+        self.btn_players.pack(side="left", padx=(0, theme.PAD_S))
         ctk.CTkLabel(s1, text="Limite :").pack(side="left", padx=(0, 4))
         ctk.CTkEntry(s1, textvariable=self.vars["scan_limit_players"], width=90).pack(side="left")
         s2 = ctk.CTkFrame(scan.body, fg_color="transparent")
         s2.grid(row=1, column=0, sticky="ew", pady=2)
-        ctk.CTkButton(s2, text="Lancer Scan Clans", width=180,
-                      command=self.run_clan_scan).pack(side="left", padx=(0, theme.PAD_S))
+        self.btn_clans = ctk.CTkButton(s2, text=_BTN_CLANS, width=180,
+                                       command=self.run_clan_scan)
+        self.btn_clans.pack(side="left", padx=(0, theme.PAD_S))
         ctk.CTkLabel(s2, text="Limite :").pack(side="left", padx=(0, 4))
         ctk.CTkEntry(s2, textvariable=self.vars["scan_limit_clans"], width=90).pack(side="left")
 
@@ -276,51 +286,82 @@ class IncrementalScanPanel(ctk.CTkFrame):
     # =====================================================================
     # Actions
     # =====================================================================
+    def _set_button(self, button, enabled: bool, text: str):
+        """Verrouille / relâche un bouton de scan depuis un thread de travail."""
+        def apply():
+            try:
+                button.configure(state="normal" if enabled else "disabled",
+                                 text=text)
+            except Exception:
+                pass
+        try:
+            self.after(0, apply)
+        except Exception:
+            pass
+
     def run_player_scan(self):
         limit = self.vars["scan_limit_players"].get()
         self.progress.set(0)
+        stop_event = threading.Event()
 
         def task():
+            from ...core.coc_api import ScanAlreadyRunning
+            self._set_button(self.btn_players, False, _BTN_RUNNING)
             self.app.log(f"Démarrage scan joueurs (limite={limit})…")
             try:
                 COC = self.apply_filters()
                 COC.scan_players_incremental(max_new_players=limit,
-                                             progress_callback=self.update_progress)
+                                             progress_callback=self.update_progress,
+                                             stop_event=stop_event)
                 self.app.log("Scan joueurs terminé.")
                 self.after(0, lambda: self.progress.set(1))
+            except ScanAlreadyRunning as e:
+                self.app.log(f"⚠ {e}")
             except Exception as e:
                 self.app.log(f"Erreur Scan : {e}")
+            finally:
+                self._set_button(self.btn_players, True, _BTN_PLAYERS)
 
-        self.app.spawn_automation(task, name="scan_joueurs")
+        self.app.spawn_automation(task, name="scan_joueurs", stop_event=stop_event)
 
     def run_clan_scan(self):
         limit = self.vars["scan_limit_clans"].get()
         self.progress.set(0)
+        stop_event = threading.Event()
 
         def task():
+            from ...core.coc_api import ScanAlreadyRunning
+            self._set_button(self.btn_clans, False, _BTN_RUNNING)
             try:
                 COC = self.apply_filters()
                 loc_ids = COC.FILTER_CONFIG.get("location_ids", [32000087])
                 self.app.log(f"Scan clans sur {len(loc_ids)} pays (limite={limit}/pays)…")
                 total = len(loc_ids)
                 for i, loc_id in enumerate(loc_ids):
+                    if stop_event.is_set():
+                        self.app.log("Scan clans interrompu.")
+                        break
                     pays = next((k for k, v in COC.LOCATIONS_DICT.items() if v == loc_id),
                                 str(loc_id))
                     self.app.log(f"  → Scan pays : {pays} ({i + 1}/{total})")
                     COC.scan_clans_incremental(
                         max_new_clans=limit, location_id=loc_id,
+                        stop_event=stop_event,
                         progress_callback=lambda cur, tot, i=i: self.update_progress(
                             (i / total) + (cur / tot / total), 1))
-                self.app.log("✅ Scan clans tous pays terminé.")
+                else:
+                    self.app.log("✅ Scan clans tous pays terminé.")
                 self.after(0, lambda: self.progress.set(1))
+            except ScanAlreadyRunning as e:
+                self.app.log(f"⚠ {e}")
             except Exception as e:
                 self.app.log(f"Erreur Scan : {e}")
+            finally:
+                self._set_button(self.btn_clans, True, _BTN_CLANS)
 
-        self.app.spawn_automation(task, name="scan_clans")
+        self.app.spawn_automation(task, name="scan_clans", stop_event=stop_event)
 
     def _update_locations(self):
-        import threading
-
         def task():
             self.app.log("Mise à jour des pays (API)… Patientez…")
             try:
@@ -337,8 +378,6 @@ class IncrementalScanPanel(ctk.CTkFrame):
         threading.Thread(target=task, daemon=True).start()
 
     def _update_leagues(self):
-        import threading
-
         def task():
             self.app.log("Mise à jour des ligues (API)… Patientez…")
             try:

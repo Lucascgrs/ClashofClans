@@ -230,7 +230,15 @@ def run_invite(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
             return
         limit = int(cfg.get("scan_limit_players", 2000))
         log(f"Scan incrémental des joueurs (limite={limit})…")
-        COC.scan_players_incremental(max_new_players=limit)
+        try:
+            # stop_event : le scan s'arrête proprement entre deux batchs
+            # (sauvegarde faite) au lieu d'être tué en pleine écriture.
+            COC.scan_players_incremental(max_new_players=limit,
+                                         stop_event=stop_event)
+        except COC.ScanAlreadyRunning as e:
+            # L'orchestrateur peut se déclencher pendant un scan manuel :
+            # on saute l'étape au lieu de lancer un second scan concurrent.
+            log(f"⚠ {e}")
 
     if mode in ("aleatoire", "les_deux"):
         if stop_event.is_set():
