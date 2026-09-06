@@ -202,14 +202,27 @@ inclus, aucune ressource réseau) qui s'ouvre dans le navigateur.
 - **Bilan cumulé des guerres** — victoires / défaites / nuls cumulés dans le
   temps, guerres classiques et LDC confondues, avec un repère ▲ / ▼ à chaque
   montée ou descente de grade de ligue de guerre.
-- **Destruction moyenne par joueur** — une ligne par joueur, une guerre par pas
-  sur l'axe X, avec cases à cocher (« Tous » / « Aucun ») pour choisir qui
-  afficher. Huit joueurs au maximum reçoivent une couleur ; au-delà les lignes
-  passent en gris — aucune palette ne reste distinguable plus loin.
+- **Évolution du rang (village principal)** — une ligne par joueur : sa ligue
+  relevée à chaque passage de la surveillance, sur un axe vertical qui suit
+  l'échelle des ligues (monter d'un cran vaut une ligue). Cases à cocher
+  (« Tous » / « Aucun ») pour choisir qui afficher ; huit joueurs au maximum
+  reçoivent une couleur, au-delà les lignes passent en gris — aucune palette ne
+  reste distinguable plus loin.
 - **Effectif** du clan dans le temps.
-- **Trois tableaux colorés** : synthèse par joueur (assiduité aux attaques,
-  étoiles moyennes par guerre, % de destruction, date de première détection),
-  détail par joueur et par guerre, et dons par joueur et par mois.
+- **Deux tableaux colorés** : détail par joueur et par guerre, et dons par
+  joueur et par mois.
+
+> **Deux échelles de ligues** cohabitent depuis le remaniement « ranked » du
+> jeu : la ligue **classée** (`leagueTier`, 37 paliers de « Squelette 1 » à
+> « Légende I ») est le rang réel aujourd'hui, tandis que la ligue
+> **historique** à trophées (`league`, 23 paliers) est figée pour la plupart
+> des comptes. La surveillance relève les deux ; le graphique prend la classée
+> dès qu'elle compte deux relevés, et retombe sinon sur l'historique, qui seul
+> couvre l'archivage antérieur. L'ordre des paliers vient de
+> `Configs/leagues.json` et `Configs/league_tiers.json` (bouton *⬇ MAJ
+> classements* de l'onglet 🔁), avec une échelle intégrée en repli : le rapport
+> ne fait aucun appel réseau. Le village de nuit n'est pas tracé — le classeur
+> n'en garde que les trophées, pas le nom de la ligue.
 
 Chaque graphique a sa **vue tableau** dépliable, et le rapport suit le thème
 clair ou sombre du système (bouton *Thème* pour forcer l'un ou l'autre).
@@ -393,6 +406,13 @@ d'envoi corrompu, montez `discord_sync_keep_versions` dans
 4. **Lancer** : depuis l'écran 🎮 pour une session d'attaques, depuis l'écran
    🧱 pour le rituel remparts seul.
 
+> **Assistants de capture** (tous les onglets) : quand une configuration existe
+> déjà, l'assistant s'ouvre sur un choix — *Seulement ce qui manque* ou *Tout
+> reconfigurer*. À n'importe quelle étape, **[ESPACE]** (ou la flèche droite)
+> passe le paramètre affiché en conservant sa valeur, qui reste visible à
+> l'écran ; [ENTRÉE] capture, [ÉCHAP] annule. Ajouter un paramètre à une
+> configuration déjà remplie ne demande donc pas de rejouer toute la série.
+
 ---
 
 ### Dons & Clans — navigation automatique entre clans
@@ -405,12 +425,14 @@ résultat` → `rejoindre` → `compris` → dons dans la zone de discussion →
 `fermer chat`.
 
 1. **Capturer les coordonnées** (*⚙ Définir les paramètres*) : l'assistant
-   demande les 12 boutons du cycle, trois **zones** (la discussion, la bande des
-   cartes de troupes et le compteur « Donner des troupes : X/Y » du panneau de
-   dons) et les 3 points de lecture du profil (`ouvrir profil`, `partager
-   l'identifiant`, `copier`) — les mêmes que l'onglet 🏰. Ouvrez le panneau de
-   dons avant de lancer l'assistant : les deux dernières zones ne sont visibles
-   que là.
+   demande les 12 boutons du cycle, cinq **zones** (la discussion, le petit
+   bouton vert « demandes plus haut », la zone témoin, la bande des cartes de
+   troupes et le compteur « Donner des troupes : X/Y ») et les 3 points de
+   lecture du profil
+   (`ouvrir profil`, `partager l'identifiant`, `copier`) — les mêmes que
+   l'onglet 🏰. Ouvrez le panneau de dons avant de lancer l'assistant : les deux
+   dernières zones ne sont visibles que là. Sur une configuration déjà remplie,
+   choisissez *Seulement ce qui manque* (ou passez les étapes avec [ESPACE]).
 
 2. **Lire les infos du compte** (*👤 Lire les infos du joueur*) : le bot ouvre
    le profil dans le jeu, copie le tag dans le presse-papiers puis interroge
@@ -443,7 +465,13 @@ résultat` → `rejoindre` → `compris` → dons dans la zone de discussion →
 #### Séquence de dons
 
 Une fois le chat du clan ouvert, la zone de discussion est lue par OCR à la
-recherche des mots-clés (`don`, `demande`…). Pour chaque demande trouvée :
+recherche des mots-clés (`don`, `demande`…). Ce scan a **toujours lieu en
+premier**, avant toute tentative de remontée, et il est tracé dans le journal
+(`→ scan du chat : 7 ligne(s) lue(s), 1 demande(s) de troupes.`). Comme les
+messages arrivent du serveur *après* l'affichage de l'écran, le premier scan
+patiente *Attente chargement chat* secondes, puis relit jusqu'à *Relectures du
+chat* fois tant qu'aucun texte ne sort — une discussion illisible n'est pas une
+discussion sans demande. Pour chaque demande trouvée :
 
 1. clic sur le bouton de la demande (la pastille verte du chat) ;
 2. dans le panneau qui s'ouvre, les cartes de troupes **en couleur** sont
@@ -451,11 +479,30 @@ recherche des mots-clés (`don`, `demande`…). Pour chaque demande trouvée :
    troupe indisponible est grisée, donc la détection se fait sur la saturation
    des pixels plutôt qu'en reconnaissant les troupes ;
 3. après chaque clic, le compteur **« X/Y »** est relu : dès que X atteint Y, la
-   demande est servie et on passe à la suivante ;
-4. tous les *N* clics (paramètre *Clics avant vérification*), le bot vérifie que
-   le panneau est encore ouvert. Si oui, il joue la **macro de défilement**
-   (droite → gauche) pour atteindre les troupes hors cadre, et recommence —
-   jusqu'à *Défilements max* fois.
+   demande est servie et on passe à la suivante ; un compteur devenu illisible
+   signifie que le jeu a refermé le panneau, seul vrai signal d'arrêt ;
+4. **une vue entièrement grisée n'est pas une fin** — la bande des troupes
+   défile, et d'autres cartes donnables attendent peut-être hors cadre. Tant que
+   le panneau est ouvert et que X n'a pas atteint Y, le bot joue donc la **macro
+   de défilement** (droite → gauche) et recommence, jusqu'à *Défilements max*
+   fois. *Clics sans effet max* borne les clics qui ne font pas avancer le
+   compteur : au-delà, la vue est jugée épuisée et on défile — une carte colorée
+   qui ne réagit pas ne doit pas faire boucler le bot.
+
+Le chat n'affiche que ses derniers messages. Une fois le champ visible scanné
+**et** servi, le bot regarde donc la zone du **petit bouton vert « demandes plus
+haut »** : tant
+qu'il est là, c'est qu'il reste des demandes actives au-dessus — il clique
+dessus, refait un scan, sert ce qu'il trouve, et recommence. Sa disparition
+termine le clan (plafonné par *Remontées max*, garde-fou contre une boucle
+infinie). Le bouton est repéré à sa **couleur verte**, comme les cartes le sont
+à leur saturation.
+
+> **Zone témoin** : un gros rectangle vert affiché dans la discussion déborde
+> parfois sur l'emplacement du bouton et se fait prendre pour lui. La zone
+> témoin, à gauche du chat, ne verdit *que* dans ce cas : si elle est verte, le
+> vert détecté n'est pas un bouton de remontée et le bot ne remonte pas. Laisser
+> cette zone non configurée désactive simplement le contrôle.
 
 Les seuils *Saturation min*, *Luminosité min* et *Aire min d'une carte* règlent
 la détection de couleur ; le bouton *🎴 Tester les cartes de dons* les vérifie

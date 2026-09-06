@@ -12,11 +12,13 @@ Contenu du rapport
 1. **Bilan cumulé des guerres** — victoires / défaites / nuls cumulés dans le
    temps (guerres classiques *et* Ligue des clans), avec un repère ▲/▼ sur l'axe
    des dates à chaque changement de grade de ligue de guerre.
-2. **Destruction moyenne par joueur** — une ligne par joueur, une guerre par pas
-   sur l'axe X, avec sélection des joueurs à afficher (cases à cocher + « Tous »).
+2. **Évolution du rang** — une ligne par joueur : la ligue du **village
+   principal** relevée à chaque passage de la surveillance, sur une échelle
+   allant de « Non classé » à « Légende », avec sélection des joueurs à
+   afficher (cases à cocher + « Tous »).
 3. **Effectif** du clan dans le temps.
-4. **Trois tableaux colorés** : synthèse par joueur, détail par guerre
-   (attaques / étoiles), et dons par joueur et par mois.
+4. **Deux tableaux colorés** : détail par guerre (attaques / étoiles) et dons
+   par joueur et par mois.
 
 Le module ne fait **aucun appel réseau** : tout vient du classeur.
 
@@ -40,7 +42,9 @@ from typing import Callable, Optional
 
 import pandas as pd
 
-from ..paths import surveillance_path, surveillance_report_path
+from ..paths import (
+    LEAGUE_TIERS_FILE, LEAGUES_FILE, surveillance_path, surveillance_report_path,
+)
 from .surveillance import (
     SHEET_CALLS, SHEET_CLAN, SHEET_MEMBERS, SHEET_WARLOG, SHEET_WARS,
     normalize_tag,
@@ -51,8 +55,52 @@ _TEMPLATE = os.path.join(os.path.dirname(__file__), "report_template.html")
 #: Nombre de guerres affichées dans le tableau détaillé (les plus récentes).
 MATRIX_WARS = 30
 
-#: Joueurs pré-cochés à l'ouverture du graphique de destruction.
+#: Joueurs pré-cochés à l'ouverture du graphique des rangs.
 DEFAULT_SELECTED = 6
+
+#: Échelle des ligues du village principal, de la plus basse à la plus haute.
+#: Sert de repli quand ``Configs/leagues.json`` n'a pas encore été téléchargé —
+#: ce module ne fait aucun appel réseau.
+LEAGUE_LADDER = (
+    "Unranked",
+    "Bronze League III", "Bronze League II", "Bronze League I",
+    "Silver League III", "Silver League II", "Silver League I",
+    "Gold League III", "Gold League II", "Gold League I",
+    "Crystal League III", "Crystal League II", "Crystal League I",
+    "Master League III", "Master League II", "Master League I",
+    "Champion League III", "Champion League II", "Champion League I",
+    "Titan League III", "Titan League II", "Titan League I",
+    "Legend League",
+)
+
+#: Échelle des **ligues classées** (remaniement « ranked »), du palier le plus
+#: bas au plus haut. Même rôle de repli que :data:`LEAGUE_LADDER`.
+TIER_LADDER = (
+    "Unranked",
+    "Skeleton League 1", "Skeleton League 2", "Skeleton League 3",
+    "Barbarian League 4", "Barbarian League 5", "Barbarian League 6",
+    "Archer League 7", "Archer League 8", "Archer League 9",
+    "Wizard League 10", "Wizard League 11", "Wizard League 12",
+    "Valkyrie League 13", "Valkyrie League 14", "Valkyrie League 15",
+    "Witch League 16", "Witch League 17", "Witch League 18",
+    "Golem League 19", "Golem League 20", "Golem League 21",
+    "P.E.K.K.A League 22", "P.E.K.K.A League 23", "P.E.K.K.A League 24",
+    "Titan League 25", "Titan League 26", "Titan League 27",
+    "Dragon League 28", "Dragon League 29", "Dragon League 30",
+    "Electro League 31", "Electro League 32", "Electro League 33",
+    "Legend III", "Legend II", "Legend I",
+)
+
+#: L'API ne répond qu'en anglais : traduction du palier, le chiffre (romain ou
+#: arabe) est conservé tel quel.
+_LEAGUE_WORDS = {
+    "Unranked": "Non classé", "Bronze": "Bronze", "Silver": "Argent",
+    "Gold": "Or", "Crystal": "Cristal", "Master": "Maître",
+    "Champion": "Champion", "Titan": "Titan", "Legend": "Légende",
+    "Skeleton": "Squelette", "Barbarian": "Barbare", "Archer": "Archer",
+    "Wizard": "Sorcier", "Valkyrie": "Valkyrie", "Witch": "Sorcière",
+    "Golem": "Golem", "Dragon": "Dragon", "Electro": "Électro",
+}
 
 
 # =============================================================================
@@ -75,6 +123,40 @@ def _num(value, default=0.0) -> float:
     except (TypeError, ValueError):
         return default
     return default if math.isnan(f) else f
+
+
+def _league_label(name) -> str:
+    """« Champion League III » → « Champion III », « Legend League » → « Légende »."""
+    txt = _txt(name)
+    if not txt:
+        return ""
+    if txt in _LEAGUE_WORDS:
+        return _LEAGUE_WORDS[txt]
+    parts = txt.replace(" League", "").split()
+    if not parts:
+        return txt
+    parts[0] = _LEAGUE_WORDS.get(parts[0], parts[0])
+    return " ".join(parts)
+
+
+def _ladder(cache: str, repli: tuple) -> list[str]:
+    """Échelle de ligues, de la plus basse à la plus haute.
+
+    Elle est lue dans le cache alimenté par l'onglet Dons & Clans (``/leagues``
+    et ``/leaguetiers``), dont les identifiants croissent avec le niveau, pour
+    qu'un remaniement du jeu se répercute sur le rapport. À défaut de cache,
+    l'échelle intégrée sert de repli : ce module ne fait aucun appel réseau."""
+    try:
+        with open(cache, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        names = [_txt(x.get("name"))
+                 for x in sorted(data, key=lambda x: int(_num(x.get("id"))))]
+        names = [n for n in names if n]
+        if len(names) >= 5:
+            return names
+    except Exception:
+        pass
+    return list(repli)
 
 
 def _epoch_ms(stamp: str) -> Optional[int]:
@@ -263,90 +345,120 @@ def _player_directory(membres: pd.DataFrame, guerres: pd.DataFrame) -> dict[str,
     return people
 
 
-def _player_stats(guerres: pd.DataFrame, wars: list[dict],
-                  people: dict[str, dict]) -> list[dict]:
-    """Synthèse par joueur : participation, attaques, étoiles, destruction.
+def _player_participation(guerres: pd.DataFrame, wars: list[dict],
+                          people: dict[str, dict]) -> list[dict]:
+    """Fiche de chaque joueur, complétée du nombre de guerres où il figurait.
 
-    Les attentes diffèrent selon le format — 2 attaques et 6 étoiles possibles
-    par guerre classique, 1 attaque et 3 étoiles par round de LDC — donc les
-    deux formats sont comptabilisés séparément avant d'être totalisés."""
-    by_id = {w["war_id"]: w for w in wars}
-    stats: dict[str, dict] = {}
-
+    Ce décompte sert à ordonner les joueurs et à écarter du tableau détaillé
+    ceux qui n'ont jamais été alignés ; les attaques et les étoiles, elles, sont
+    rendues guerre par guerre par :func:`_war_matrix`."""
+    known = {w["war_id"] for w in wars}
+    counts: dict[str, int] = {}
     if not guerres.empty:
         for _, r in guerres.iterrows():
-            war = by_id.get(_txt(r.get("war_id")))
-            if war is None:
-                continue
-            tag = _txt(r.get("player_tag"))
-            kind = "ldc" if war["type"] == "ldc" else "gdc"
-            s = stats.setdefault(tag, {
-                "gdc": {"wars": 0, "attacks": 0, "expected": 0, "stars": 0,
-                        "max_stars": 0, "destruction": 0.0},
-                "ldc": {"wars": 0, "attacks": 0, "expected": 0, "stars": 0,
-                        "max_stars": 0, "destruction": 0.0},
-            })
-            bucket = s[kind]
-            apm = war["attacks_per_member"]
-            attacks = int(_num(r.get("attacks_done")))
-            bucket["wars"] += 1
-            bucket["attacks"] += attacks
-            bucket["expected"] += apm
-            bucket["stars"] += int(_num(r.get("stars")))
-            bucket["max_stars"] += apm * 3
-            bucket["destruction"] += _num(r.get("destruction_avg")) * attacks
+            if _txt(r.get("war_id")) in known:
+                tag = _txt(r.get("player_tag"))
+                counts[tag] = counts.get(tag, 0) + 1
 
-    rows = []
-    for tag, person in people.items():
-        s = stats.get(tag)
-        gdc = s["gdc"] if s else {"wars": 0, "attacks": 0, "expected": 0,
-                                  "stars": 0, "max_stars": 0, "destruction": 0.0}
-        ldc = s["ldc"] if s else {"wars": 0, "attacks": 0, "expected": 0,
-                                  "stars": 0, "max_stars": 0, "destruction": 0.0}
-        attacks = gdc["attacks"] + ldc["attacks"]
-        rows.append({
-            **person,
-            "gdc_wars": gdc["wars"], "gdc_attacks": gdc["attacks"],
-            "gdc_expected": gdc["expected"], "gdc_stars": gdc["stars"],
-            "gdc_max_stars": gdc["max_stars"],
-            "ldc_wars": ldc["wars"], "ldc_attacks": ldc["attacks"],
-            "ldc_expected": ldc["expected"], "ldc_stars": ldc["stars"],
-            "ldc_max_stars": ldc["max_stars"],
-            "wars": gdc["wars"] + ldc["wars"],
-            "attacks": attacks,
-            "expected": gdc["expected"] + ldc["expected"],
-            "stars": gdc["stars"] + ldc["stars"],
-            "max_stars": gdc["max_stars"] + ldc["max_stars"],
-            "destruction": round(
-                (gdc["destruction"] + ldc["destruction"]) / attacks, 1
-            ) if attacks else None,
-        })
+    rows = [{**person, "wars": counts.get(tag, 0)}
+            for tag, person in people.items()]
     rows.sort(key=lambda r: (-r["wars"], r["name"].lower()))
     return rows
 
 
-def _player_series(guerres: pd.DataFrame, wars: list[dict],
-                   players: list[dict]) -> dict:
-    """Destruction moyenne par joueur et par guerre (``None`` = non participé)."""
-    index = {w["war_id"]: w["index"] for w in wars}
-    size = len(wars)
-    series = {p["tag"]: [None] * size for p in players}
+def _rank_from_column(membres: pd.DataFrame, colonne: str,
+                      ladder: list[str], scale: str) -> Optional[dict]:
+    """Série de rangs bâtie sur une colonne de ligue, ``None`` si elle est vide.
 
-    if not guerres.empty:
-        for _, r in guerres.iterrows():
-            i = index.get(_txt(r.get("war_id")))
-            tag = _txt(r.get("player_tag"))
-            if i is None or tag not in series:
-                continue
-            if int(_num(r.get("attacks_done"))) > 0:
-                series[tag][i] = round(_num(r.get("destruction_avg")), 1)
+    La valeur portée par le graphique est l'**indice** de la ligue dans
+    l'échelle (0 = « Non classé ») : une ligue n'est pas une grandeur numérique,
+    mais l'indice donne un axe régulier où monter d'un cran vaut une ligue."""
+    if colonne not in membres.columns:
+        return None
 
-    average = []
-    for i in range(size):
-        values = [v[i] for v in series.values() if v[i] is not None]
-        average.append(round(sum(values) / len(values), 1) if values else None)
+    rang = {name: i for i, name in enumerate(ladder)}
+    stamps = [ts for ts in sorted({_txt(v) for v in membres["timestamp"] if _txt(v)})
+              if _epoch_ms(ts) is not None]
+    if not stamps:
+        return None
+    index = {ts: i for i, ts in enumerate(stamps)}
 
-    return {"series": series, "average": average}
+    series: dict[str, list] = {}
+    unknown: set[str] = set()
+    remplis: set[int] = set()
+    for _, r in membres.iterrows():
+        i = index.get(_txt(r.get("timestamp")))
+        tag = _txt(r.get("player_tag"))
+        if i is None or not tag:
+            continue
+        ligue = _txt(r.get(colonne))
+        if not ligue:
+            continue
+        if ligue not in rang:
+            # Ligue inconnue de l'échelle (remaniement du jeu, cache périmé) :
+            # mieux vaut un trou dans la courbe qu'un rang inventé.
+            unknown.add(ligue)
+            continue
+        series.setdefault(tag, [None] * len(stamps))[i] = rang[ligue]
+        remplis.add(i)
+
+    if not remplis:
+        return None
+
+    # L'axe se limite aux relevés que cette échelle renseigne : la ligue classée
+    # n'est collectée que depuis peu, et garder les relevés antérieurs vides
+    # tasserait toutes les courbes contre le bord droit du graphique.
+    garde = sorted(remplis)
+    return {
+        "scale": scale,
+        "releves": len(garde),
+        "ladder": [_league_label(n) for n in ladder],
+        "points": [_epoch_ms(stamps[i]) for i in garde],
+        "dates": [stamps[i][:10] for i in garde],
+        "series": {tag: [ligne[i] for i in garde] for tag, ligne in series.items()},
+        "unknown": sorted(unknown),
+    }
+
+
+def _rank_series(membres: pd.DataFrame) -> dict:
+    """Rang du **village principal** de chaque joueur, relevé par relevé.
+
+    Deux échelles cohabitent depuis le remaniement « ranked » du jeu : la ligue
+    **classée** (``league_tier``), qui est le rang réel aujourd'hui, et la ligue
+    **historique** à trophées (``league``), figée depuis pour la plupart des
+    comptes. La classée l'emporte dès qu'elle compte deux relevés — en dessous,
+    il n'y a pas encore de courbe à tracer — sinon on retombe sur l'historique,
+    qui couvre tout l'archivage antérieur.
+
+    Un joueur absent d'un relevé — pas encore recruté, ou déjà parti — n'a pas
+    de point : la ligne se rompt au lieu de relier deux dates éloignées.
+
+    Le village de nuit n'est pas repris : le classeur n'en garde que les
+    trophées (``builder_trophies``), pas le nom de la ligue."""
+    candidats = [
+        _rank_from_column(membres, "league_tier",
+                          _ladder(LEAGUE_TIERS_FILE, TIER_LADDER), "tiers"),
+        _rank_from_column(membres, "league",
+                          _ladder(LEAGUES_FILE, LEAGUE_LADDER), "leagues"),
+    ]
+    choisi = (next((c for c in candidats if c and c["releves"] >= 2), None)
+              or next((c for c in candidats if c), None))
+    if choisi is None:
+        return {"scale": "", "scaleLabel": "", "note": "", "ladder": [],
+                "points": [], "dates": [], "series": {}, "unknown": []}
+
+    if choisi["scale"] == "tiers":
+        choisi["scaleLabel"] = "ligue classée"
+        choisi["note"] = ""
+    else:
+        choisi["scaleLabel"] = "ligue historique (à trophées)"
+        choisi["note"] = (
+            "Depuis le remaniement « ranked » du jeu, cette échelle historique ne "
+            "bouge quasiment plus : le rang réel du village principal est la ligue "
+            "classée, relevée par la surveillance depuis peu. Le graphique basculera "
+            "dessus dès qu'elle comptera deux relevés.")
+    choisi.pop("releves", None)
+    return choisi
 
 
 def _war_matrix(guerres: pd.DataFrame, wars: list[dict],
@@ -486,9 +598,9 @@ def build_report(clan_tag: str, output_path: str | None = None,
     wars = _build_wars(guerres, journal)
     cumul = _cumulative(wars)
     people = _player_directory(membres, guerres)
-    players = _player_stats(guerres, wars, people)
-    series = _player_series(guerres, wars, players)
+    players = _player_participation(guerres, wars, people)
     matrix = _war_matrix(guerres, wars, players)
+    ranks = _rank_series(membres)
 
     if not wars and not players:
         raise ValueError(
@@ -497,11 +609,10 @@ def build_report(clan_tag: str, output_path: str | None = None,
 
     payload = {
         "overview": _overview(clan, wars, cumul, people, clan_tag),
-        "wars": wars,
         "cumulative": cumul,
         "leagueChanges": _league_changes(clan),
         "players": players,
-        "series": series,
+        "ranks": ranks,
         "matrix": matrix,
         "donations": _donations(membres),
         "roster": _roster(membres, clan),
@@ -522,6 +633,11 @@ def build_report(clan_tag: str, output_path: str | None = None,
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(document)
 
+    if ranks["unknown"]:
+        log("⚠ Ligues absentes de l'échelle, non tracées : "
+            + ", ".join(ranks["unknown"])
+            + " — mettez à jour Configs/leagues.json (onglet Dons & Clans, "
+              "« MAJ classements »).")
     log(f"✅ Rapport généré : {output_path}")
     log(f"   {len(wars)} guerres · {len(players)} joueurs · "
         f"{cumul['wins']}V / {cumul['losses']}D / {cumul['ties']}N")

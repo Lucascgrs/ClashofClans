@@ -1,83 +1,95 @@
 {
     "buttons": {
         "ouvrir_chat": {
-            "x": 68,
-            "y": 490
+            "x": 76,
+            "y": 494
         },
         "fermer_chat": {
-            "x": 765,
-            "y": 490
+            "x": 779,
+            "y": 502
         },
         "banniere_clan": {
-            "x": 257,
-            "y": 59
+            "x": 319,
+            "y": 54
         },
         "quitter": {
-            "x": 1539,
-            "y": 738
+            "x": 1583,
+            "y": 719
         },
         "valider_quitter": {
-            "x": 1163,
-            "y": 687
+            "x": 1155,
+            "y": 677
         },
         "rejoindre_chat": {
-            "x": 370,
-            "y": 916
+            "x": 355,
+            "y": 934
         },
         "onglet_rechercher": {
-            "x": 935,
-            "y": 203
+            "x": 931,
+            "y": 211
         },
         "barre_recherche": {
-            "x": 625,
-            "y": 340
+            "x": 692,
+            "y": 353
         },
         "bouton_rechercher": {
-            "x": 1068,
-            "y": 348
+            "x": 1067,
+            "y": 346
         },
         "premier_clan": {
-            "x": 545,
-            "y": 525
+            "x": 695,
+            "y": 526
         },
         "rejoindre": {
-            "x": 1576,
-            "y": 730
+            "x": 1553,
+            "y": 741
         },
         "compris": {
-            "x": 309,
-            "y": 689
+            "x": 353,
+            "y": 736
         },
         "ouvrir_profil": {
-            "x": 85,
-            "y": 61
+            "x": 82,
+            "y": 69
         },
         "partager_identifiant": {
-            "x": 755,
-            "y": 298
+            "x": 758,
+            "y": 296
         },
         "copier_id": {
-            "x": 935,
-            "y": 290
+            "x": 933,
+            "y": 306
         }
     },
     "zones": {
         "discussion": {
-            "x1": 22,
-            "y1": 101,
-            "x2": 718,
-            "y2": 958
+            "x1": 21,
+            "y1": 97,
+            "x2": 720,
+            "y2": 973
+        },
+        "bouton_remonter": {
+            "x1": 661,
+            "y1": 115,
+            "x2": 703,
+            "y2": 165
+        },
+        "controle_vert": {
+            "x1": 51,
+            "y1": 125,
+            "x2": 87,
+            "y2": 150
         },
         "cartes": {
-            "x1": 756,
-            "y1": 188,
-            "x2": 1746,
-            "y2": 546
+            "x1": 758,
+            "y1": 191,
+            "x2": 1751,
+            "y2": 545
         },
         "compteur": {
-            "x1": 758,
-            "y1": 137,
-            "x2": 1117,
+            "x1": 756,
+            "y1": 139,
+            "x2": 1096,
             "y2": 175
         }
     },
@@ -111,23 +123,25 @@
         "clan_types": [
             "open"
         ],
-        "min_members": 3,
+        "min_members": 7,
         "max_members": 49,
         "verifier_api": true,
         "eviter_revisites": true,
         "verifier_prerequis": true,
         "marge_trophees": 0,
-        "max_clans": 2,
+        "max_clans": 5,
         "deja_sans_clan": false,
         "inclure_diese": true,
         "valider_par_entree": false,
-        "delay_click": 0.8,
-        "delay_ecran": 1.5,
+        "delay_click": 1.0,
+        "delay_ecran": 2.0,
         "delay_recherche": 2.5,
         "delay_join": 3.0,
-        "delay_profil": 2.0,
+        "delay_profil": 2.5,
         "detect_dons": true,
-        "mots_cles_don": "Donner, doer",
+        "mots_cles_don": "Donner, doer, doxer, doner, dover, doxe, dovver, doxxer, d0ner, d0nner,d0xer,d0ver,d0vver,d0xxer",
+        "attente_chat": 2.0,
+        "relectures_chat": 3,
         "clics_avant_verif": 8,
         "max_slides": 3,
         "macro_slide": "defiler_dons.json",
@@ -135,6 +149,11 @@
         "saturation_min": 90,
         "valeur_min": 70,
         "aire_min_carte": 1200,
+        "max_remontees": 5,
+        "vert_h_min": 35,
+        "vert_h_max": 85,
+        "aire_min_bouton": 300,
+        "aire_min_controle": 300,
         "attente_don": 0.0,
         "attente_sans_don": 0.5,
         "macro_don": "",

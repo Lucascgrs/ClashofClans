@@ -377,62 +377,174 @@ class JsonViewer(Dialog):
 # ConfigWizard — assistant générique de capture de coordonnées
 # =========================================================================
 class ConfigWizard(Dialog):
-    """Assistant de capture (points, zones, barres verticales).
+    """Assistant de capture (points, zones, barres verticales, triangles).
 
     ``steps`` : liste de tuples ``(clé_dottée, type, titre, description)`` avec
     ``type`` ∈ {'point', 'zone', 'vline', 'triangle'}. À la fin, ``on_save(cfg)``
     est appelé. ``triangle`` capture 3 sommets successifs et les stocke en liste
     ``[[x, y], [x, y], [x, y]]`` sous la clé dottée.
+
+    L'assistant s'ouvre sur un choix — tout reconfigurer, ou seulement les
+    paramètres encore vides — et, à n'importe quelle étape, [ESPACE] la passe en
+    conservant sa valeur actuelle. Ajouter un paramètre à une configuration déjà
+    remplie ne demande donc plus de rejouer toute la série.
     """
+
+    #: Touches qui passent l'étape courante sans toucher à sa valeur.
+    _TOUCHES_PASSER = (keyboard.Key.space, keyboard.Key.right)
 
     def __init__(self, master, *, title: str, cfg: dict, steps: list,
                  on_save: Callable[[dict], None], log: Callable[[str], None]):
-        super().__init__(master, title, width=580, height=380)
+        super().__init__(master, title, width=620, height=470)
         self.cfg = cfg
         self.steps = steps
         self.on_save = on_save
         self.log = log
         self._mouse = mouse.Controller()
-        self._state = {"step_idx": 0, "sub_idx": 0, "current_zone_tl": None}
+        self._state = {"step_idx": 0, "sub_idx": 0, "current_zone_tl": None,
+                       "triangle_pts": None}
         self._listener = None
+        self._only_missing = False
+        self._captures = 0
+        self._conserves = 0
         self.attributes("-topmost", True)
 
-        wrap = ctk.CTkFrame(self, fg_color="transparent")
-        wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
-
-        ctk.CTkLabel(
-            wrap, justify="center",
-            text=("Placez la souris sur la cible décrite ci-dessous,\n"
-                  "puis appuyez sur [ENTRÉE] pour capturer.\n"
-                  "Appuyez sur [ÉCHAP] pour annuler."),
-        ).pack(pady=(0, 10))
-
-        self.lbl_step = ctk.CTkLabel(wrap, text="", font=theme.font_h2(),
-                                     text_color=theme.ACCENT)
-        self.lbl_step.pack(pady=2)
-        self.lbl_desc = ctk.CTkLabel(wrap, text="", wraplength=520, justify="center")
-        self.lbl_desc.pack(pady=2)
-        self.lbl_sub = ctk.CTkLabel(wrap, text="", font=theme.font_body(),
-                                    text_color=theme.MUTED)
-        self.lbl_sub.pack(pady=2)
-        self.lbl_pos = ctk.CTkLabel(wrap, text="Souris : x=0, y=0",
-                                    font=ctk.CTkFont(size=16, weight="bold"))
-        self.lbl_pos.pack(pady=6)
-        self.lbl_progress = ctk.CTkLabel(wrap, text="", text_color=theme.MUTED)
-        self.lbl_progress.pack(pady=2)
+        self._wrap = ctk.CTkFrame(self, fg_color="transparent")
+        self._wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
 
         self.protocol("WM_DELETE_WINDOW", self._close)
+        self._build_choice()
+
+    # --- lecture de l'état courant d'un paramètre ---
+    @staticmethod
+    def _get_nested(d: dict, dotted_key: str):
+        section, name = dotted_key.split(".", 1)
+        return (d.get(section) or {}).get(name)
+
+    @classmethod
+    def _is_set(cls, cfg: dict, key: str, typ: str) -> bool:
+        """Le paramètre a-t-il déjà une valeur exploitable ?"""
+        val = cls._get_nested(cfg, key)
+        if val is None:
+            return False
+        if typ == "point":
+            return bool(val.get("x") or val.get("y"))
+        if typ == "vline":
+            return bool(val)
+        if typ == "triangle":
+            return len(val) >= 3
+        if typ == "zone":
+            return (val.get("x2", 0) > val.get("x1", 0)
+                    and val.get("y2", 0) > val.get("y1", 0))
+        return False
+
+    @classmethod
+    def _describe(cls, cfg: dict, key: str, typ: str) -> str:
+        val = cls._get_nested(cfg, key)
+        if not cls._is_set(cfg, key, typ):
+            return "non configuré"
+        if typ == "point":
+            return f"({val['x']}, {val['y']})"
+        if typ == "vline":
+            return f"X = {val}"
+        if typ == "triangle":
+            return " ; ".join(f"({p[0]}, {p[1]})" for p in val)
+        return f"({val['x1']}, {val['y1']}) → ({val['x2']}, {val['y2']})"
+
+    def _pending(self) -> list:
+        return [st for st in self.steps if not self._is_set(self.cfg, st[0], st[1])]
+
+    # --- écran d'accueil : tout, ou seulement ce qui manque ---
+    def _build_choice(self):
+        manquants = len(self._pending())
+        total = len(self.steps)
+        if manquants == total:
+            # Rien n'est encore configuré : le choix n'a pas d'objet.
+            self._start(only_missing=False)
+            return
+
+        ctk.CTkLabel(self._wrap, justify="center", font=theme.font_h2(),
+                     text=f"{total - manquants} paramètre(s) sur {total} "
+                          f"déjà configuré(s)").pack(pady=(theme.PAD, 4))
+        ctk.CTkLabel(
+            self._wrap, justify="center", wraplength=540,
+            text=("Vous pouvez ne capturer que les paramètres encore vides, ou "
+                  "tout reprendre depuis le début.\n"
+                  "Dans les deux cas, [ESPACE] passe l'étape affichée en "
+                  "conservant sa valeur actuelle."),
+        ).pack(pady=(0, theme.PAD))
+
+        ctk.CTkButton(
+            self._wrap, height=44,
+            text=f"⏭  Seulement ce qui manque  ({manquants})",
+            fg_color=theme.SUCCESS, hover_color=theme.ACCENT_HOVER,
+            command=lambda: self._start(only_missing=True),
+        ).pack(fill="x", pady=(0, theme.PAD_S))
+        ctk.CTkButton(
+            self._wrap, height=44, text=f"⟳  Tout reconfigurer  ({total})",
+            command=lambda: self._start(only_missing=False),
+        ).pack(fill="x")
+
+    # --- écran de capture ---
+    def _start(self, only_missing: bool):
+        self._only_missing = only_missing
+        for child in self._wrap.winfo_children():
+            child.destroy()
+
+        ctk.CTkLabel(
+            self._wrap, justify="center",
+            text=("Placez la souris sur la cible décrite ci-dessous,\n"
+                  "puis appuyez sur [ENTRÉE] pour capturer.\n"
+                  "[ESPACE] passe l'étape (valeur conservée) — [ÉCHAP] annule."),
+        ).pack(pady=(0, 10))
+
+        self.lbl_step = ctk.CTkLabel(self._wrap, text="", font=theme.font_h2(),
+                                     text_color=theme.ACCENT)
+        self.lbl_step.pack(pady=2)
+        self.lbl_desc = ctk.CTkLabel(self._wrap, text="", wraplength=540,
+                                     justify="center")
+        self.lbl_desc.pack(pady=2)
+        self.lbl_actuel = ctk.CTkLabel(self._wrap, text="", font=theme.font_small(),
+                                       text_color=theme.MUTED, wraplength=540)
+        self.lbl_actuel.pack(pady=2)
+        self.lbl_sub = ctk.CTkLabel(self._wrap, text="", font=theme.font_body(),
+                                    text_color=theme.MUTED)
+        self.lbl_sub.pack(pady=2)
+        self.lbl_pos = ctk.CTkLabel(self._wrap, text="Souris : x=0, y=0",
+                                    font=ctk.CTkFont(size=16, weight="bold"))
+        self.lbl_pos.pack(pady=6)
+        self.lbl_progress = ctk.CTkLabel(self._wrap, text="", text_color=theme.MUTED)
+        self.lbl_progress.pack(pady=2)
+
         self._start_listener()
         self._render_step()
         self._update_mouse()
 
     # --- rendu ---
     def _render_step(self):
+        # En mode « ce qui manque », on saute d'office les étapes déjà remplies.
+        if self._only_missing:
+            while (self._state["step_idx"] < len(self.steps)
+                   and self._is_set(self.cfg, *self.steps[self._state["step_idx"]][:2])):
+                self._state["step_idx"] += 1
+                self._conserves += 1
+
         if self._state["step_idx"] >= len(self.steps):
+            self._finish()
             return
-        _key, typ, step_title, desc = self.steps[self._state["step_idx"]]
+
+        key, typ, step_title, desc = self.steps[self._state["step_idx"]]
         self.lbl_step.configure(text=step_title)
         self.lbl_desc.configure(text=desc)
+
+        actuel = self._describe(self.cfg, key, typ)
+        if self._is_set(self.cfg, key, typ):
+            self.lbl_actuel.configure(
+                text=f"Valeur actuelle : {actuel}  —  [ESPACE] pour la conserver",
+                text_color=theme.SUCCESS)
+        else:
+            self.lbl_actuel.configure(text="Jamais configuré", text_color=theme.WARNING)
+
         if typ == "zone":
             self.lbl_sub.configure(text=("➤ Coin HAUT-GAUCHE" if self._state["sub_idx"] == 0
                                          else "➤ Coin BAS-DROIT"))
@@ -459,20 +571,39 @@ class ConfigWizard(Dialog):
         section, name = dotted_key.split(".", 1)
         d.setdefault(section, {})[name] = value
 
+    def _advance(self):
+        """Passe à l'étape suivante en repartant d'un sous-état propre."""
+        self._state["step_idx"] += 1
+        self._state["sub_idx"] = 0
+        self._state["current_zone_tl"] = None
+        self._state["triangle_pts"] = None
+        self._render_step()
+
+    def _skip(self):
+        """Conserve la valeur actuelle de l'étape et passe à la suivante."""
+        if self._state["step_idx"] >= len(self.steps):
+            return
+        key, typ, step_title, _ = self.steps[self._state["step_idx"]]
+        self.log(f"[{step_title}] conservé → {self._describe(self.cfg, key, typ)}")
+        self._conserves += 1
+        self._advance()
+
     def _capture(self):
+        if self._state["step_idx"] >= len(self.steps):
+            return
         x, y = self._mouse.position
         x, y = int(x), int(y)
         key, typ, step_title, _ = self.steps[self._state["step_idx"]]
         if typ == "point":
             self._set_nested(self.cfg, key, {"x": x, "y": y})
             self.log(f"[{step_title}] capturé → ({x}, {y})")
-            self._state["step_idx"] += 1
-            self._state["sub_idx"] = 0
+            self._captures += 1
+            self._advance()
         elif typ == "vline":
             self._set_nested(self.cfg, key, x)
             self.log(f"[{step_title}] barre verticale → X = {x}")
-            self._state["step_idx"] += 1
-            self._state["sub_idx"] = 0
+            self._captures += 1
+            self._advance()
         elif typ == "triangle":
             pts = self._state.get("triangle_pts") or []
             pts.append([x, y])
@@ -480,16 +611,17 @@ class ConfigWizard(Dialog):
             self.log(f"[{step_title}] sommet {len(pts)}/3 → ({x}, {y})")
             if len(pts) >= 3:
                 self._set_nested(self.cfg, key, pts)
-                self._state["triangle_pts"] = None
-                self._state["step_idx"] += 1
-                self._state["sub_idx"] = 0
+                self._captures += 1
+                self._advance()
             else:
                 self._state["sub_idx"] = len(pts)
+                self._render_step()
         else:  # zone
             if self._state["sub_idx"] == 0:
                 self._state["current_zone_tl"] = (x, y)
                 self.log(f"[{step_title}] coin haut-gauche → ({x}, {y})")
                 self._state["sub_idx"] = 1
+                self._render_step()
             else:
                 x1, y1 = self._state["current_zone_tl"]
                 self._set_nested(self.cfg, key, {
@@ -497,18 +629,18 @@ class ConfigWizard(Dialog):
                     "x2": max(x1, x), "y2": max(y1, y),
                 })
                 self.log(f"[{step_title}] coin bas-droit → ({x}, {y})")
-                self._state["current_zone_tl"] = None
-                self._state["step_idx"] += 1
-                self._state["sub_idx"] = 0
+                self._captures += 1
+                self._advance()
 
-        if self._state["step_idx"] >= len(self.steps):
-            self.on_save(self.cfg)
-            from tkinter import messagebox
-            messagebox.showinfo("Terminé",
-                                "Tous les paramètres ont été configurés et sauvegardés.")
-            self._close()
-        else:
-            self._render_step()
+    def _finish(self):
+        self.on_save(self.cfg)
+        from tkinter import messagebox
+        messagebox.showinfo(
+            "Terminé",
+            f"Configuration enregistrée.\n\n"
+            f"{self._captures} paramètre(s) capturé(s), "
+            f"{self._conserves} conservé(s).")
+        self._close()
 
     # --- listener clavier global ---
     def _start_listener(self):
@@ -516,6 +648,8 @@ class ConfigWizard(Dialog):
             try:
                 if key == keyboard.Key.enter:
                     self.after(0, self._capture)
+                elif key in self._TOUCHES_PASSER:
+                    self.after(0, self._skip)
                 elif key == keyboard.Key.esc:
                     self.after(0, self._close)
             except AttributeError:
@@ -540,41 +674,112 @@ class ConfigWizard(Dialog):
 class CoordsCaptureDialog(Dialog):
     """Capture successive de plusieurs points nommés (ENTRÉE pour valider).
 
-    Appelle ``on_complete(dict_nom_vers_[x, y])`` une fois tous les points saisis.
+    Mêmes commodités que :class:`ConfigWizard` : ``initial`` fournit les
+    coordonnées déjà connues, l'assistant propose alors de ne capturer que
+    celles qui manquent, et [ESPACE] passe un point en conservant sa valeur.
+
+    Appelle ``on_complete(dict_nom_vers_[x, y])`` à la fin — le dictionnaire
+    contient aussi les points conservés, jamais seulement les nouveaux.
     """
 
+    _TOUCHES_PASSER = (keyboard.Key.space, keyboard.Key.right)
+
     def __init__(self, master, *, keys: list, on_complete: Callable[[dict], None],
-                 log: Callable[[str], None]):
-        super().__init__(master, "Configuration des coordonnées", width=440, height=320)
+                 log: Callable[[str], None], initial: Optional[dict] = None):
+        super().__init__(master, "Configuration des coordonnées", width=520, height=400)
         self.keys = keys
         self.on_complete = on_complete
         self.log = log
         self._idx = 0
-        self._captured: dict = {}
+        self._captured: dict = dict(initial or {})
+        self._captures = 0
+        self._conserves = 0
+        self._only_missing = False
         self._mouse = mouse.Controller()
         self._listener = None
         self.attributes("-topmost", True)
 
-        wrap = ctk.CTkFrame(self, fg_color="transparent")
-        wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
-
-        ctk.CTkLabel(wrap, justify="center",
-                     text="Placez la souris sur la zone indiquée\n"
-                          "et appuyez sur [ENTRÉE] pour valider.").pack(pady=(0, 10))
-        self.lbl_pos = ctk.CTkLabel(wrap, text="Souris : x=0, y=0",
-                                    font=ctk.CTkFont(size=16, weight="bold"))
-        self.lbl_pos.pack(pady=6)
-        self.lbl_step = ctk.CTkLabel(wrap, text="", font=theme.font_h2(),
-                                     text_color=theme.ACCENT)
-        self.lbl_step.pack(pady=16)
+        self._wrap = ctk.CTkFrame(self, fg_color="transparent")
+        self._wrap.pack(fill="both", expand=True, padx=theme.PAD_L, pady=theme.PAD)
 
         self.protocol("WM_DELETE_WINDOW", self._close)
-        self._render()
+        self._build_choice()
+
+    def _is_set(self, name: str) -> bool:
+        val = self._captured.get(name)
+        return bool(val) and (int(val[0]) or int(val[1]))
+
+    def _describe(self, name: str) -> str:
+        val = self._captured.get(name)
+        return f"({int(val[0])}, {int(val[1])})" if self._is_set(name) else "non configuré"
+
+    def _build_choice(self):
+        manquants = [k for k in self.keys if not self._is_set(k)]
+        if len(manquants) == len(self.keys):
+            self._start(only_missing=False)
+            return
+
+        ctk.CTkLabel(self._wrap, justify="center", font=theme.font_h2(),
+                     text=f"{len(self.keys) - len(manquants)} point(s) sur "
+                          f"{len(self.keys)} déjà configuré(s)").pack(pady=(theme.PAD, 4))
+        ctk.CTkLabel(
+            self._wrap, justify="center", wraplength=440,
+            text=("Ne capturer que les points manquants, ou tout reprendre.\n"
+                  "[ESPACE] passe le point affiché en conservant sa valeur."),
+        ).pack(pady=(0, theme.PAD))
+        ctk.CTkButton(
+            self._wrap, height=44,
+            text=f"⏭  Seulement ce qui manque  ({len(manquants)})",
+            fg_color=theme.SUCCESS, hover_color=theme.ACCENT_HOVER,
+            command=lambda: self._start(only_missing=True),
+        ).pack(fill="x", pady=(0, theme.PAD_S))
+        ctk.CTkButton(
+            self._wrap, height=44, text=f"⟳  Tout reconfigurer  ({len(self.keys)})",
+            command=lambda: self._start(only_missing=False),
+        ).pack(fill="x")
+
+    def _start(self, only_missing: bool):
+        self._only_missing = only_missing
+        for child in self._wrap.winfo_children():
+            child.destroy()
+
+        ctk.CTkLabel(self._wrap, justify="center",
+                     text=("Placez la souris sur la zone indiquée et appuyez sur "
+                           "[ENTRÉE].\n[ESPACE] passe le point (valeur conservée) "
+                           "— [ÉCHAP] annule.")).pack(pady=(0, 10))
+        self.lbl_pos = ctk.CTkLabel(self._wrap, text="Souris : x=0, y=0",
+                                    font=ctk.CTkFont(size=16, weight="bold"))
+        self.lbl_pos.pack(pady=6)
+        self.lbl_step = ctk.CTkLabel(self._wrap, text="", font=theme.font_h2(),
+                                     text_color=theme.ACCENT)
+        self.lbl_step.pack(pady=(12, 2))
+        self.lbl_actuel = ctk.CTkLabel(self._wrap, text="", font=theme.font_small(),
+                                       text_color=theme.MUTED)
+        self.lbl_actuel.pack(pady=2)
+        self.lbl_progress = ctk.CTkLabel(self._wrap, text="", text_color=theme.MUTED)
+        self.lbl_progress.pack(pady=6)
+
         self._start_listener()
+        self._render()
         self._update_mouse()
 
     def _render(self):
-        self.lbl_step.configure(text=f"Cible : {self.keys[self._idx]}")
+        if self._only_missing:
+            while self._idx < len(self.keys) and self._is_set(self.keys[self._idx]):
+                self._idx += 1
+                self._conserves += 1
+        if self._idx >= len(self.keys):
+            self._finish()
+            return
+        name = self.keys[self._idx]
+        self.lbl_step.configure(text=f"Cible : {name}")
+        if self._is_set(name):
+            self.lbl_actuel.configure(
+                text=f"Valeur actuelle : {self._describe(name)}  —  "
+                     f"[ESPACE] pour la conserver", text_color=theme.SUCCESS)
+        else:
+            self.lbl_actuel.configure(text="Jamais configuré", text_color=theme.WARNING)
+        self.lbl_progress.configure(text=f"Point {self._idx + 1} / {len(self.keys)}")
 
     def _update_mouse(self):
         if not self.winfo_exists():
@@ -588,6 +793,8 @@ class CoordsCaptureDialog(Dialog):
             try:
                 if key == keyboard.Key.enter:
                     self.after(0, self._capture)
+                elif key in self._TOUCHES_PASSER:
+                    self.after(0, self._skip)
                 elif key == keyboard.Key.esc:
                     self.after(0, self._close)
             except AttributeError:
@@ -595,19 +802,34 @@ class CoordsCaptureDialog(Dialog):
         self._listener = keyboard.Listener(on_press=on_press)
         self._listener.start()
 
+    def _skip(self):
+        if self._idx >= len(self.keys):
+            return
+        name = self.keys[self._idx]
+        self.log(f"Conservé {name} : {self._describe(name)}")
+        self._conserves += 1
+        self._idx += 1
+        self._render()
+
     def _capture(self):
+        if self._idx >= len(self.keys):
+            return
         x, y = self._mouse.position
         name = self.keys[self._idx]
         self._captured[name] = [int(x), int(y)]
         self.log(f"Configuré {name} : {int(x)}, {int(y)}")
+        self._captures += 1
         self._idx += 1
-        if self._idx < len(self.keys):
-            self._render()
-        else:
-            self.on_complete(self._captured)
-            from tkinter import messagebox
-            messagebox.showinfo("Terminé", "Toutes les coordonnées ont été sauvegardées !")
-            self._close()
+        self._render()
+
+    def _finish(self):
+        self.on_complete(self._captured)
+        from tkinter import messagebox
+        messagebox.showinfo(
+            "Terminé",
+            f"Coordonnées sauvegardées.\n\n"
+            f"{self._captures} point(s) capturé(s), {self._conserves} conservé(s).")
+        self._close()
 
     def _close(self):
         if self._listener is not None:

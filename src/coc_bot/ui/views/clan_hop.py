@@ -170,6 +170,11 @@ class ClanHopView(BaseView):
         self.v_sat = tk.IntVar(value=int(p.get("saturation_min", 90)))
         self.v_val = tk.IntVar(value=int(p.get("valeur_min", 70)))
         self.v_aire = tk.IntVar(value=int(p.get("aire_min_carte", 1200)))
+        self.v_remontees = tk.IntVar(value=int(p.get("max_remontees", 10)))
+        self.v_aire_bouton = tk.IntVar(value=int(p.get("aire_min_bouton", 300)))
+        self.v_aire_controle = tk.IntVar(value=int(p.get("aire_min_controle", 300)))
+        self.v_attente_chat = tk.DoubleVar(value=float(p.get("attente_chat", 2.0)))
+        self.v_relectures = tk.IntVar(value=int(p.get("relectures_chat", 3)))
         self.v_attente = tk.DoubleVar(value=float(p.get("attente_don", 0.0)))
         self.v_attente_sans = tk.DoubleVar(value=float(p.get("attente_sans_don", 0.0)))
 
@@ -190,11 +195,16 @@ class ClanHopView(BaseView):
         grid = ctk.CTkFrame(dons.body, fg_color="transparent")
         grid.grid(row=2, column=0, sticky="w", pady=(theme.PAD_S, 0))
         for i, (label, var) in enumerate([
-            ("Clics avant vérification", self.v_clics),
+            ("Clics sans effet max", self.v_clics),
             ("Défilements max", self.v_slides),
             ("Saturation min", self.v_sat),
             ("Luminosité min", self.v_val),
             ("Aire min d'une carte", self.v_aire),
+            ("Remontées max", self.v_remontees),
+            ("Aire min bouton vert", self.v_aire_bouton),
+            ("Aire min témoin vert", self.v_aire_controle),
+            ("Attente chargement chat (s)", self.v_attente_chat),
+            ("Relectures du chat", self.v_relectures),
             ("Pause après dons (s)", self.v_attente),
             ("Attente sans demande (s)", self.v_attente_sans),
         ]):
@@ -213,10 +223,18 @@ class ClanHopView(BaseView):
             dons.body,
             "Après le clic sur une demande, le bot clique les cartes de troupes "
             "EN COULEUR (les grisées sont indisponibles) jusqu'à ce que le "
-            "compteur « X/Y » atteigne Y. Tous les N clics il vérifie que le "
-            "panneau est encore ouvert et, si oui, joue la macro de défilement "
-            "pour atteindre les troupes situées à droite.\n"
-            "Saturation / Luminosité / Aire servent à régler cette détection de "
+            "compteur « X/Y » atteigne Y. Une vue entièrement grisée n'est PAS "
+            "une fin : tant que le panneau est ouvert et que X n'a pas atteint "
+            "Y, il joue la macro de défilement pour aller chercher les troupes "
+            "hors cadre, jusqu'à « Défilements max » fois. « Clics sans effet "
+            "max » borne les clics qui ne font pas avancer le compteur — au-delà "
+            "la vue est jugée épuisée et on défile.\n"
+            "Une fois le champ visible servi, si le petit bouton vert « demandes "
+            "plus haut » est présent, le bot clique dessus et refait un scan — "
+            "tant qu'il est là, c'est qu'il reste des demandes actives. La zone "
+            "témoin, à gauche du chat, écarte les faux positifs : si ELLE est "
+            "verte, le vert détecté n'est qu'un bloc de message.\n"
+            "Saturation / Luminosité / Aire servent à régler ces détections de "
             "couleur : montez la saturation si des cartes grisées sont cliquées, "
             "baissez-la si des cartes disponibles sont ignorées."
         ).grid(row=4, column=0, sticky="w", pady=(theme.PAD_S, 0))
@@ -390,6 +408,11 @@ class ClanHopView(BaseView):
             "saturation_min": int(self.v_sat.get()),
             "valeur_min": int(self.v_val.get()),
             "aire_min_carte": int(self.v_aire.get()),
+            "max_remontees": int(self.v_remontees.get()),
+            "aire_min_bouton": int(self.v_aire_bouton.get()),
+            "aire_min_controle": int(self.v_aire_controle.get()),
+            "attente_chat": float(self.v_attente_chat.get()),
+            "relectures_chat": int(self.v_relectures.get()),
             "attente_don": float(self.v_attente.get()),
             "attente_sans_don": float(self.v_attente_sans.get()),
         })
@@ -470,9 +493,15 @@ class ClanHopView(BaseView):
                 lignes = hopper.lire_discussion()
                 for ligne in lignes:
                     self._log(f"  ({ligne['x']}, {ligne['y']}) {ligne['texte']}")
-                demandes = hopper.demandes_de_dons()
+                demandes = hopper.filtrer_demandes(lignes)
+                bouton = hopper.bouton_remonter()
+                etat = (f"bouton vert « plus haut » détecté en "
+                        f"({bouton['x']}, {bouton['y']}), aire {bouton['aire']} px"
+                        if bouton else "aucun bouton vert « plus haut »")
+                etat += (" | témoin VERT (remontée bloquée)" if hopper.temoin_vert()
+                         else " | témoin non vert")
                 self._log(f"--- {len(lignes)} ligne(s) lue(s), "
-                          f"{len(demandes)} demande(s) de troupes ---")
+                          f"{len(demandes)} demande(s) de troupes | {etat} ---")
             except Exception as e:
                 self._log(f"Erreur lecture du chat : {e}")
 

@@ -115,6 +115,14 @@ CLANHOP_DEFAULT_CONFIG = {
     "zones": {
         # Toute la discussion : sert à repérer les demandes de troupes.
         "discussion": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
+        # Emplacement du petit bouton vert « demandes plus haut » : sa présence
+        # signale des demandes encore actives au-dessus du champ visible.
+        "bouton_remonter": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
+        # Témoin anti faux-positif, à gauche dans la discussion : un gros
+        # rectangle vert (un message du clan) déborde parfois sur la zone du
+        # bouton. Ce témoin est vert dans ce cas-là UNIQUEMENT, jamais quand le
+        # vrai bouton de remontée est affiché.
+        "controle_vert": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
         # Panneau de dons : la bande des cartes de troupes (celle qui défile).
         "cartes": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
         # Panneau de dons : le « Donner des troupes : X/Y ».
@@ -151,6 +159,10 @@ CLANHOP_DEFAULT_CONFIG = {
         # --- Dons -------------------------------------------------------------
         "detect_dons":       True,        # OCR de la discussion avant de donner
         "mots_cles_don":     "don, donner, donate, demande, request",
+        # Le chat arrive du serveur APRÈS l'écran : scanné trop tôt il est vide
+        # et le bot conclurait à tort qu'aucune demande n'est en cours.
+        "attente_chat":      2.0,         # pause avant le tout premier scan
+        "relectures_chat":   3,           # relectures tant que rien n'est lisible
         "clics_avant_verif": 5,           # clics sur des cartes avant re-vérification
         "max_slides":        3,           # nb de défilements de la bande de troupes
         "macro_slide":       "",          # macro Actions/*.json : défilement droite→gauche
@@ -162,6 +174,13 @@ CLANHOP_DEFAULT_CONFIG = {
         "saturation_min":    90,
         "valeur_min":        70,
         "aire_min_carte":    1200,
+        # Bouton vert « demandes plus haut » : même principe, restreint à la
+        # teinte verte (H en 0-179 dans la convention OpenCV).
+        "max_remontees":     10,          # sécurité : remontées max par clan
+        "vert_h_min":        35,
+        "vert_h_max":        85,
+        "aire_min_bouton":   300,
+        "aire_min_controle": 300,         # vert dans le témoin ⇒ faux positif
         "attente_don":       0.0,         # pause après avoir traité les demandes
         "attente_sans_don":  0.0,         # temps passé dans un clan sans demande
     },
@@ -215,6 +234,19 @@ CLANHOP_CONFIG_STEPS = [
      "ZONE DE DISCUSSION",
      "Délimitez toute la zone de discussion : coin HAUT-GAUCHE puis coin BAS-DROIT. "
      "C'est dans ce rectangle que les demandes de troupes sont recherchées."),
+    ("zones.bouton_remonter",     "zone",
+     "ZONE DU BOUTON VERT « PLUS HAUT »",
+     "Délimitez l'endroit où apparaît le petit bouton vert qui remonte vers une "
+     "demande de troupes plus haut dans la conversation (coin HAUT-GAUCHE puis "
+     "coin BAS-DROIT). Cadrez SERRÉ autour du bouton : c'est sa présence, "
+     "détectée à la couleur, qui dit s'il reste des demandes actives."),
+    ("zones.controle_vert",       "zone",
+     "ZONE TÉMOIN (ne doit PAS être verte)",
+     "À GAUCHE dans la discussion : délimitez une zone qui devient verte quand "
+     "un gros rectangle vert s'affiche dans le chat, mais qui NE l'est PAS quand "
+     "le vrai bouton de remontée apparaît. Si ce témoin est vert, le bot en "
+     "déduit que le « bouton » détecté n'en est pas un et ne remonte pas. "
+     "Laissez la zone non configurée pour désactiver ce contrôle."),
     ("zones.cartes",              "zone",
      "ZONE DES CARTES DE TROUPES",
      "Cliquez sur une demande de troupes pour ouvrir le panneau de dons, puis "
@@ -896,54 +928,136 @@ class ClanHopper:
         raw = self.params.get("mots_cles_don", "")
         return [_normalize(m) for m in raw.split(",") if m.strip()]
 
-    def demandes_de_dons(self) -> list:
-        """Boutons de demande repérés dans la discussion (zone verte + mot-clé)."""
+    def filtrer_demandes(self, lignes: list) -> list:
+        """Parmi des lignes déjà lues, celles qui portent un mot-clé de don."""
         mots = self._mots_cles()
         if not mots:
             return []
-        return [ligne for ligne in self.lire_discussion()
+        return [ligne for ligne in lignes
                 if any(m in _normalize(ligne["texte"]) for m in mots)]
+
+    def demandes_de_dons(self) -> list:
+        """Boutons de demande repérés dans la discussion (zone verte + mot-clé)."""
+        return self.filtrer_demandes(self.lire_discussion())
+
+    def scanner_chat(self, attendre: bool = False) -> list:
+        """Scan de la discussion → demandes de troupes, tracé dans le journal.
+
+        ``attendre`` sert au tout premier scan d'un clan : les messages du chat
+        arrivent du serveur après l'écran, et une discussion lue trop tôt est
+        vide. On patiente donc, puis on relit tant qu'AUCUN texte ne sort — une
+        discussion illisible n'est pas une discussion sans demande.
+        """
+        pause = float(self.params.get("attente_chat", 2.0))
+        essais = max(1, int(self.params.get("relectures_chat", 3))) if attendre else 1
+        if attendre and pause > 0:
+            self._sleep(pause)
+
+        lignes = []
+        for essai in range(essais):
+            if self._stop_requested():
+                return []
+            lignes = self.lire_discussion()
+            if lignes or essai == essais - 1:
+                break
+            self.log(f"  → discussion encore vide (chat en cours de chargement), "
+                     f"relecture {essai + 2}/{essais}…")
+            self._sleep(pause if pause > 0 else self._delay("delay_ecran"))
+
+        demandes = self.filtrer_demandes(lignes)
+        self.log(f"  → scan du chat : {len(lignes)} ligne(s) lue(s), "
+                 f"{len(demandes)} demande(s) de troupes.")
+        return demandes
 
     # ---------- panneau de dons : cartes de troupes et compteur ----------
 
-    def cartes_donnables(self) -> list:
-        """Cartes de troupes DONNABLES visibles dans la zone des cartes.
+    def _taches_colorees(self, nom: str, aire_min: int, teinte=None) -> list:
+        """Amas de pixels COLORÉS d'une zone → ``[{"x", "y", "aire"}]``.
 
-        Dans le panneau de dons, une troupe donnable est dessinée en couleur sur
-        fond bleu ; une troupe indisponible est grisée. On cherche donc les amas
-        de pixels SATURÉS : gris, blanc et noir ont une saturation quasi nulle et
-        sont écartés d'office, sans avoir à reconnaître les troupes une par une.
+        Le gris, le blanc et le noir ont une saturation quasi nulle : les
+        écarter suffit à distinguer un élément actif d'un élément grisé, sans
+        avoir à reconnaître ce qu'il représente. ``teinte`` — un couple
+        ``(h_min, h_max)`` en convention OpenCV (0-179) — restreint en plus la
+        recherche à une couleur précise (le vert du bouton de remontée).
 
-        Retourne ``[{"x", "y", "aire"}]`` (centres à l'écran), de gauche à droite.
+        Les taches sont rendues de gauche à droite.
         """
         import cv2
         import numpy as np
 
-        img, x1, y1 = self._grab("cartes")
+        img, x1, y1 = self._grab(nom)
         if img is None:
             return []
 
         hsv = cv2.cvtColor(np.ascontiguousarray(img), cv2.COLOR_RGB2HSV)
-        sat_min = int(self.params.get("saturation_min", 90))
-        val_min = int(self.params.get("valeur_min", 70))
-        aire_min = int(self.params.get("aire_min_carte", 1200))
-
-        mask = (hsv[:, :, 1] >= sat_min) & (hsv[:, :, 2] >= val_min)
+        mask = ((hsv[:, :, 1] >= int(self.params.get("saturation_min", 90)))
+                & (hsv[:, :, 2] >= int(self.params.get("valeur_min", 70))))
+        if teinte is not None:
+            h_min, h_max = teinte
+            mask &= (hsv[:, :, 0] >= h_min) & (hsv[:, :, 0] <= h_max)
         mask = mask.astype(np.uint8) * 255
-        # Ferme les trous internes (contours, chiffres) pour qu'une carte forme
+        # Ferme les trous internes (contours, chiffres) pour qu'un élément forme
         # une seule tache plutôt qu'une constellation de fragments.
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
 
         nb, _labels, stats, centres = cv2.connectedComponentsWithStats(mask, 8)
-        cartes = []
+        taches = []
         for k in range(1, nb):
             aire = int(stats[k, cv2.CC_STAT_AREA])
             if aire < aire_min:
                 continue
             cx, cy = centres[k]
-            cartes.append({"x": x1 + int(cx), "y": y1 + int(cy), "aire": aire})
-        cartes.sort(key=lambda c: c["x"])
-        return cartes
+            taches.append({"x": x1 + int(cx), "y": y1 + int(cy), "aire": aire})
+        taches.sort(key=lambda t: t["x"])
+        return taches
+
+    def cartes_donnables(self) -> list:
+        """Cartes de troupes DONNABLES visibles dans la zone des cartes.
+
+        Dans le panneau de dons, une troupe donnable est dessinée en couleur sur
+        fond bleu ; une troupe indisponible est grisée.
+        """
+        return self._taches_colorees(
+            "cartes", int(self.params.get("aire_min_carte", 1200)))
+
+    def _vert(self) -> tuple:
+        """Bornes de teinte du vert (convention OpenCV, 0-179)."""
+        return (int(self.params.get("vert_h_min", 35)),
+                int(self.params.get("vert_h_max", 85)))
+
+    def temoin_vert(self) -> bool:
+        """La zone témoin est-elle verte ? (contrôle désactivé ⇒ ``False``)
+
+        Un gros rectangle vert affiché dans la discussion déborde parfois sur
+        l'emplacement du bouton de remontée et se fait prendre pour lui. Le
+        témoin, placé à gauche dans le chat, ne verdit QUE dans ce cas : s'il
+        est vert, le « bouton » détecté n'en est pas un.
+        """
+        if self._zone("controle_vert") is None:
+            return False        # zone non configurée : contrôle désactivé
+        return bool(self._taches_colorees(
+            "controle_vert",
+            int(self.params.get("aire_min_controle", 300)),
+            teinte=self._vert()))
+
+    def bouton_remonter(self) -> Optional[dict]:
+        """Le petit bouton vert « demandes plus haut », s'il est affiché.
+
+        Sa présence signifie qu'il reste des demandes de troupes actives
+        au-dessus du champ visible : cliquer dessus y remonte la conversation.
+        Retourne ``None`` si la zone témoin est verte (voir :meth:`temoin_vert`).
+        """
+        taches = self._taches_colorees(
+            "bouton_remonter",
+            int(self.params.get("aire_min_bouton", 300)),
+            teinte=self._vert())
+        if not taches:
+            return None
+        if self.temoin_vert():
+            self.log("  → vert détecté mais témoin vert aussi : simple bloc vert "
+                     "dans la discussion, pas une remontée.")
+            return None
+        return max(taches, key=lambda t: t["aire"])
 
     #: « Donner des troupes : 3/8 ». Le vrai « / » d'abord ; en repli seulement,
     #: les caractères pour lesquels l'OCR le confond — sinon « 312 » se lirait
@@ -999,42 +1113,72 @@ class ClanHopper:
     def donner_troupes(self) -> str:
         """Vide le panneau de dons ouvert. Retourne l'issue, pour le journal.
 
-        Boucle : cliquer les cartes en couleur (= donnables) tant qu'il y en a.
-        Le don est terminé quand le compteur « X/Y » atteint Y — mais il peut
-        aussi s'arrêter avant (le demandeur a été servi entre-temps, ou plus
-        aucune de nos troupes ne l'intéresse). Tous les ``clics_avant_verif``
-        clics, on regarde donc si le panneau est toujours ouvert ; s'il l'est,
-        on fait défiler les troupes de droite à gauche (macro) pour atteindre
-        celles qui sont hors du cadre, et on recommence.
+        On clique les cartes en couleur — les donnables — en relisant le
+        compteur « X/Y » après chaque clic : X qui rejoint Y termine la demande,
+        et un compteur devenu illisible signifie que le jeu a refermé le
+        panneau, seul vrai signal d'arrêt.
+
+        Une vue où **toutes les cartes sont grisées n'est pas une fin** : la
+        bande des troupes défile, et d'autres cartes donnables attendent
+        peut-être hors cadre. Tant que le panneau est là et que X n'a pas atteint
+        Y, on joue donc la macro de défilement et on recommence — jusqu'à
+        ``max_slides`` fois.
+
+        ``clics_avant_verif`` borne les clics **sans effet** : si le compteur
+        n'avance pas après ce nombre de clics, la vue est considérée comme
+        épuisée (une carte colorée qui ne réagit pas ne doit pas faire boucler le
+        bot) et on passe au défilement.
         """
         clics_max = max(1, int(self.params.get("clics_avant_verif", 5)))
         slides_max = max(0, int(self.params.get("max_slides", 3)))
         macro = (self.params.get("macro_slide") or "").strip()
-        total = 0
+        # Sans zone de compteur configurée, X/Y est hors de portée : on retombe
+        # sur un simple quota de clics par vue.
+        suivi = self._zone("compteur") is not None
+        total = slides = sans_effet = 0
 
-        for tentative in range(slides_max + 1):
-            for _ in range(clics_max):
-                if self._stop_requested():
-                    return "interrompu"
-                cartes = self.cartes_donnables()
-                if not cartes:
-                    break            # rien de donnable dans la vue courante
+        donnees, demandees = self.lire_compteur() if suivi else (None, None)
+
+        def fini() -> bool:
+            return bool(demandees) and donnees is not None and donnees >= demandees
+
+        while True:
+            if self._stop_requested():
+                return "interrompu"
+
+            cartes = self.cartes_donnables()
+            if cartes and sans_effet < clics_max:
                 self._click_xy(cartes[0]["x"], cartes[0]["y"])
                 total += 1
+                if not suivi:
+                    sans_effet += 1
+                    continue
+                avant = donnees
                 donnees, demandees = self.lire_compteur()
-                if donnees is not None and demandees and donnees >= demandees:
+                if donnees is None:
+                    self.log(f"    panneau refermé après {total} don(s).")
+                    return "termine"
+                if fini():
                     self.log(f"    don complet ({donnees}/{demandees}).")
                     return "complet"
+                sans_effet = 0 if (avant is None or donnees > avant) else sans_effet + 1
+                continue
 
-            if not self.panneau_dons_ouvert():
-                self.log(f"    panneau refermé après {total} don(s).")
-                return "termine"
-            if tentative >= slides_max:
+            # Plus rien à cliquer ICI — mais le don n'est pas terminé pour
+            # autant : c'est le moment de faire défiler la bande.
+            if slides >= slides_max:
                 break
             if not macro:
-                self.log("    plus rien à donner ici (aucune macro de défilement).")
+                self.log("    plus aucune carte donnable dans la vue, et aucune "
+                         "macro de défilement configurée pour aller voir plus loin.")
                 break
-            self.log(f"    défilement des troupes ({tentative + 1}/{slides_max})…")
+            slides += 1
+            cause = ("toutes les cartes visibles sont grisées" if not cartes
+                     else f"{sans_effet} clic(s) sans effet sur le compteur")
+            reste = (f", il reste {demandees - donnees} troupe(s) à donner"
+                     if suivi and donnees is not None and demandees else "")
+            self.log(f"    {cause}{reste} : défilement des troupes "
+                     f"({slides}/{slides_max})…")
             try:
                 playback.LecteurPosition(fichier_entree=macro).rejouer(
                     stop_event=self.stop_event)
@@ -1042,6 +1186,15 @@ class ClanHopper:
                 self.log(f"    ⚠ Erreur macro de défilement « {macro} » : {e}")
                 break
             self._sleep(self._delay("delay_click"))
+            sans_effet = 0
+            if suivi:
+                donnees, demandees = self.lire_compteur()
+                if donnees is None:
+                    self.log(f"    panneau refermé après {total} don(s).")
+                    return "termine"
+                if fini():
+                    self.log(f"    don complet ({donnees}/{demandees}).")
+                    return "complet"
 
         if self.params.get("echap_apres_don", True) and self.panneau_dons_ouvert():
             pyautogui.press("esc")
@@ -1049,34 +1202,25 @@ class ClanHopper:
         self.log(f"    {total} don(s) effectué(s).")
         return "epuise"
 
-    def faire_les_dons(self) -> int:
-        """Traite les demandes de troupes visibles dans la discussion.
+    def _traiter_demandes_visibles(self, demandes: list) -> int:
+        """Sert les demandes du scan ``demandes`` (champ actuel du chat).
 
-        Retourne le nombre de demandes traitées (``-1`` si la détection est
-        désactivée : on attend alors simplement le temps configuré).
+        La discussion bouge (nouveaux messages, demande servie qui disparaît) :
+        on la relit après chaque don plutôt que de rejouer des coordonnées
+        devenues fausses. Les positions déjà cliquées sont mémorisées pour ne
+        pas boucler sur une demande qui resterait affichée.
         """
-        if not self.params.get("detect_dons", True):
-            self._sleep(float(self.params.get("attente_don", 15.0)))
-            return -1
-
-        demandes = self.demandes_de_dons()
         if not demandes:
-            self.log("  → aucune demande de troupes détectée.")
-            self._sleep(float(self.params.get("attente_sans_don", 0.0)))
             return 0
 
-        self.log(f"  → {len(demandes)} demande(s) de troupes détectée(s).")
         traitees = 0
-        # La discussion bouge (nouveaux messages, demande servie qui disparaît) :
-        # on la relit avant chaque don plutôt que de rejouer des coordonnées
-        # devenues fausses. Les positions déjà cliquées sont mémorisées pour ne
-        # pas boucler sur une demande qui resterait affichée.
         deja = []
+        restantes = list(demandes)
         for _ in range(len(demandes)):
             if self._stop_requested():
                 break
             suivante = next(
-                (d for d in self.demandes_de_dons()
+                (d for d in restantes
                  if not any(abs(d["x"] - px) < 25 and abs(d["y"] - py) < 25
                             for px, py in deja)),
                 None)
@@ -1088,9 +1232,53 @@ class ClanHopper:
             self._sleep(self._delay("delay_ecran"))
             self.donner_troupes()
             traitees += 1
-
-        self._sleep(float(self.params.get("attente_don", 0.0)))
+            restantes = self.demandes_de_dons()
         return traitees
+
+    def faire_les_dons(self) -> int:
+        """Sert les demandes du clan, en remontant la conversation si besoin.
+
+        Le chat n'affiche que ses derniers messages : quand des demandes restent
+        actives plus haut, le jeu affiche un petit bouton vert qui y ramène. On
+        sert donc ce qui est visible, puis, tant que ce bouton est là, on clique
+        dessus et on recommence — sa disparition signifie qu'il n'y a plus rien à
+        donner dans ce clan.
+
+        Retourne le nombre de demandes traitées (``-1`` si la détection est
+        désactivée : on attend alors simplement le temps configuré).
+        """
+        if not self.params.get("detect_dons", True):
+            self._sleep(float(self.params.get("attente_don", 15.0)))
+            return -1
+
+        total = 0
+        max_remontees = max(0, int(self.params.get("max_remontees", 10)))
+        for remontee in range(max_remontees + 1):
+            if self._stop_requested():
+                break
+            # Ordre imposé : on scanne et on sert TOUJOURS ce qui est affiché
+            # avant de chercher à remonter. Le premier scan patiente le temps
+            # que le chat du clan se charge (voir scanner_chat).
+            total += self._traiter_demandes_visibles(
+                self.scanner_chat(attendre=(remontee == 0)))
+
+            bouton = self.bouton_remonter()
+            if bouton is None:
+                break
+            if remontee >= max_remontees:
+                self.log(f"  → limite de {max_remontees} remontées atteinte.")
+                break
+            self.log(f"  → demandes plus haut dans la discussion "
+                     f"(remontée {remontee + 1}/{max_remontees})…")
+            self._click_xy(bouton["x"], bouton["y"])
+            self._sleep(self._delay("delay_ecran"))
+
+        if total:
+            self._sleep(float(self.params.get("attente_don", 0.0)))
+        else:
+            self.log("  → aucune demande de troupes détectée.")
+            self._sleep(float(self.params.get("attente_sans_don", 0.0)))
+        return total
 
     # ---------- boucle principale ----------
 

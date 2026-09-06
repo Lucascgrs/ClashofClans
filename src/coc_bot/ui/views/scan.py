@@ -114,7 +114,21 @@ class ScanView(BaseView):
             except Exception as e:
                 self.app.log(f"Erreur sauvegarde coordonnées : {e}")
 
-        CoordsCaptureDialog(self, keys=keys, on_complete=on_complete, log=self.app.log)
+        # Coordonnées déjà connues : lues directement dans le JSON plutôt que via
+        # coc_api, dont le simple import déclenche la création du jeton API.
+        initial = {}
+        try:
+            import json
+            import os
+            from ... import paths
+            if os.path.exists(paths.COORDS_CONFIG_FILE):
+                with open(paths.COORDS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    initial = json.load(f)
+        except Exception:
+            initial = {}
+
+        CoordsCaptureDialog(self, keys=keys, on_complete=on_complete,
+                            log=self.app.log, initial=initial)
 
     def _save_orch_config(self):
         from ..widgets import ask_string

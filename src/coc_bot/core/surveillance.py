@@ -397,7 +397,12 @@ def _member_rows(clan: dict, clan_tag: str, timestamp: str) -> list[dict]:
             "townhall_level": m.get("townHallLevel"),
             "trophies": m.get("trophies"),
             "builder_trophies": m.get("builderBaseTrophies"),
+            # Deux échelles cohabitent depuis le remaniement « ranked » : la
+            # ligue historique (à trophées) ne bouge plus pour la plupart des
+            # comptes, la ligue classée est celle qui vit désormais.
             "league": (m.get("league") or {}).get("name"),
+            "league_tier": (m.get("leagueTier") or {}).get("name"),
+            "league_tier_id": (m.get("leagueTier") or {}).get("id"),
             "donations": m.get("donations"),
             "donations_received": m.get("donationsReceived"),
         }
