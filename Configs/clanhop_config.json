@@ -1,0 +1,143 @@
+{
+    "buttons": {
+        "ouvrir_chat": {
+            "x": 68,
+            "y": 490
+        },
+        "fermer_chat": {
+            "x": 765,
+            "y": 490
+        },
+        "banniere_clan": {
+            "x": 257,
+            "y": 59
+        },
+        "quitter": {
+            "x": 1539,
+            "y": 738
+        },
+        "valider_quitter": {
+            "x": 1163,
+            "y": 687
+        },
+        "rejoindre_chat": {
+            "x": 370,
+            "y": 916
+        },
+        "onglet_rechercher": {
+            "x": 935,
+            "y": 203
+        },
+        "barre_recherche": {
+            "x": 625,
+            "y": 340
+        },
+        "bouton_rechercher": {
+            "x": 1068,
+            "y": 348
+        },
+        "premier_clan": {
+            "x": 545,
+            "y": 525
+        },
+        "rejoindre": {
+            "x": 1576,
+            "y": 730
+        },
+        "compris": {
+            "x": 309,
+            "y": 689
+        },
+        "ouvrir_profil": {
+            "x": 85,
+            "y": 61
+        },
+        "partager_identifiant": {
+            "x": 755,
+            "y": 298
+        },
+        "copier_id": {
+            "x": 935,
+            "y": 290
+        }
+    },
+    "zones": {
+        "discussion": {
+            "x1": 22,
+            "y1": 101,
+            "x2": 718,
+            "y2": 958
+        },
+        "cartes": {
+            "x1": 756,
+            "y1": 188,
+            "x2": 1746,
+            "y2": 546
+        },
+        "compteur": {
+            "x1": 758,
+            "y1": 137,
+            "x2": 1117,
+            "y2": 175
+        }
+    },
+    "joueur": {
+        "tag": "#PPQU0LYVR",
+        "name": "P’tit Lulu",
+        "townHallLevel": 18,
+        "trophies": 0,
+        "builderHallLevel": 9,
+        "builderBaseTrophies": 3078,
+        "league": {
+            "id": 105000032,
+            "name": "Electro League 32",
+            "iconUrls": {
+                "small": "https://api-assets.clashofclans.com/leaguetiers/125/iX8uNhG6jBcQATWFS8a0gtidGy9O1PRYtXZZMTtUK3U.png",
+                "large": "https://api-assets.clashofclans.com/leaguetiers/326/iX8uNhG6jBcQATWFS8a0gtidGy9O1PRYtXZZMTtUK3U.png"
+            }
+        },
+        "builderBaseLeague": {
+            "id": 44000025,
+            "name": "Iron League I"
+        },
+        "expLevel": 215,
+        "role": "coLeader",
+        "clan": "#2R2YVCLJQ"
+    },
+    "params": {
+        "source": "parquet",
+        "melanger": false,
+        "random_limit": 20,
+        "clan_types": [
+            "open"
+        ],
+        "min_members": 3,
+        "max_members": 49,
+        "verifier_api": true,
+        "eviter_revisites": true,
+        "verifier_prerequis": true,
+        "marge_trophees": 0,
+        "max_clans": 2,
+        "deja_sans_clan": false,
+        "inclure_diese": true,
+        "valider_par_entree": false,
+        "delay_click": 0.8,
+        "delay_ecran": 1.5,
+        "delay_recherche": 2.5,
+        "delay_join": 3.0,
+        "delay_profil": 2.0,
+        "detect_dons": true,
+        "mots_cles_don": "Donner, doer",
+        "clics_avant_verif": 8,
+        "max_slides": 3,
+        "macro_slide": "defiler_dons.json",
+        "echap_apres_don": true,
+        "saturation_min": 90,
+        "valeur_min": 70,
+        "aire_min_carte": 1200,
+        "attente_don": 0.0,
+        "attente_sans_don": 0.5,
+        "macro_don": "",
+        "clics_par_demande": 1
+    }
+}

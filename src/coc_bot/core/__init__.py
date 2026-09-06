@@ -10,6 +10,7 @@ Chaque sous-module est autonome et expose une API claire :
 * :mod:`coc_bot.core.walls`          — auto-amélioration des remparts par OCR (``WallsUpgrader``)
 * :mod:`coc_bot.core.upgrades`       — auto-amélioration des premiers choix (``UpgradesRunner``)
 * :mod:`coc_bot.core.attack_session` — sessions d'attaque multi-comptes (``run_attack_session``)
+* :mod:`coc_bot.core.clan_hopper`    — navigation de clan en clan pour donner (``ClanHopper``)
 * :mod:`coc_bot.core.multi_account`  — enchaînement multi-comptes (``run_multi_session``)
 * :mod:`coc_bot.core.orchestration`  — planification/enchaînement de tâches + arrêt d'urgence
 """

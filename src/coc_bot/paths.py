@@ -102,6 +102,8 @@ ENV_FILE: str = data_path(".env")
 COORDS_CONFIG_FILE: str = config_path("coords_config.json")
 LOCATIONS_FILE: str = config_path("locations.json")
 LEAGUES_FILE: str = config_path("leagues.json")
+BUILDER_LEAGUES_FILE: str = config_path("builder_base_leagues.json")
+LEAGUE_TIERS_FILE: str = config_path("league_tiers.json")
 WALLS_CONFIG_FILE: str = config_path("walls_config.json")
 UPGRADES_CONFIG_FILE: str = config_path("upgrades_config.json")
 RESEARCH_CONFIG_FILE: str = config_path("research_config.json")
@@ -110,6 +112,8 @@ ATTACK_CONFIG_FILE: str = config_path("attack_config.json")
 ACCOUNTS_CONFIG_FILE: str = config_path("accounts_config.json")
 MULTI_LAST_FILE: str = config_path("multi_account_config.json")
 PLAYER_TAGS_FILE: str = data_path("player_tags.txt")
+CLANHOP_CONFIG_FILE: str = config_path("clanhop_config.json")
+CLANHOP_STATE_FILE: str = config_path("clanhop_state.json")
 ORCHESTRATION_SETTINGS_FILE: str = str(ORCHESTRATION_DIR / "orchestration_settings.json")
 
 # Bases de données scannées (métadonnées en .xlsx, données volumineuses en .parquet)
@@ -132,6 +136,10 @@ _LEGACY_ROOT_CONFIGS = (
     "attack_config.json",
     "accounts_config.json",
     "multi_account_config.json",
+    "clanhop_config.json",
+    "clanhop_state.json",
+    "builder_base_leagues.json",
+    "league_tiers.json",
 )
 
 

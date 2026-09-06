@@ -50,6 +50,7 @@ NAV_ITEMS = [
     ("upgrades",      "⬆",  "Améliorations",  "upgrades",      "UpgradesView"),
     ("research",      "🔬", "Recherches",     "research",      "ResearchView"),
     ("base",          "🏰", "Base / Obstacles","base_layout",  "BaseLayoutView"),
+    ("clanhop",       "🔁", "Dons & Clans",   "clan_hop",      "ClanHopView"),
     ("multi",         "👥", "Multi Compte",   "multi",         "MultiView"),
     ("orchestration", "🗂", "Orchestration",  "orchestration", "OrchestrationView"),
     ("data",          "📊", "Données",        "data",          "DataView"),

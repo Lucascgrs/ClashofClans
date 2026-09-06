@@ -4,6 +4,7 @@ Permet d'enchaîner ou de planifier l'exécution des trois types de tâches gér
 par l'application :
 
     - "invite"   : recherche aléatoire / scan incrémental + invitation (COC.py)
+    - "clanhop"  : navigation de clan en clan pour donner des troupes
     - "attack"   : session d'attaques multi-comptes (attack_session.py)
     - "playback" : rejeu d'une macro souris/clavier (playback.py)
 
@@ -53,11 +54,13 @@ ACTIONS_DIR = str(_ACTIONS_DIR)
 TASK_INVITE = "invite"
 TASK_ATTACK = "attack"
 TASK_PLAYBACK = "playback"
+TASK_CLANHOP = "clanhop"
 
 TYPE_ICONS = {
     TASK_INVITE: "✉",
     TASK_ATTACK: "⚔",
     TASK_PLAYBACK: "▶",
+    TASK_CLANHOP: "🔁",
 }
 
 LogCallback = Callable[[str], None]
@@ -189,7 +192,7 @@ def list_config_files() -> list[dict]:
         except Exception:
             continue
         typ = cfg.get("type")
-        if typ not in (TASK_INVITE, TASK_ATTACK):
+        if typ not in (TASK_INVITE, TASK_ATTACK, TASK_CLANHOP):
             continue
         out.append({
             "path": path,
@@ -280,6 +283,15 @@ def run_attack(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
     )
 
 
+def run_clanhop(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None:
+    from . import clan_hopper  # import paresseux
+
+    max_clans = int(cfg.get("max_clans", 0))
+    log(f"Navigation entre clans ({max_clans or 'illimité'})…")
+    clan_hopper.run_clan_hop(log_callback=log, stop_event=stop_event,
+                             max_clans=max_clans)
+
+
 def run_playback(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None:
     from . import playback  # import paresseux
 
@@ -295,6 +307,7 @@ RUNNERS: dict[str, Callable[[dict, threading.Event, LogCallback], None]] = {
     TASK_INVITE: run_invite,
     TASK_ATTACK: run_attack,
     TASK_PLAYBACK: run_playback,
+    TASK_CLANHOP: run_clanhop,
 }
 
 

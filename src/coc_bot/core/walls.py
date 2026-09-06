@@ -185,6 +185,35 @@ def save_walls_config(cfg: dict) -> None:
 LogCallback = Callable[[str], None]
 
 
+def create_ocr_reader(langs=("fr", "en")):
+    """Crée le lecteur easyocr en neutralisant la boîte de dialogue Windows.
+
+    ``torchvision`` (dépendance d'easyocr) échoue à charger ``image.pyd`` sur
+    certaines installations. L'erreur est bénigne — easyocr n'utilise pas ce
+    module et se rabat proprement — mais Windows affiche une boîte de dialogue
+    MODALE (« Image incorrecte », 0xc0e90002) qui fige l'application tant que
+    personne ne clique dessus. ``SetErrorMode`` la supprime le temps de
+    l'import ; l'ancien mode est restauré ensuite.
+
+    Le premier appel prend une trentaine de secondes (chargement de torch et
+    des modèles) : appelez-le AVANT la première capture plutôt qu'au milieu
+    d'une séquence de clics.
+    """
+    import ctypes
+
+    SEM_FAILCRITICALERRORS = 0x0001
+    SEM_NOGPFAULTERRORBOX = 0x0002
+    SEM_NOOPENFILEERRORBOX = 0x8000
+    kernel32 = ctypes.windll.kernel32
+    ancien = kernel32.SetErrorMode(
+        SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX)
+    try:
+        import easyocr  # import lourd, lazy
+        return easyocr.Reader(list(langs), verbose=False)
+    finally:
+        kernel32.SetErrorMode(ancien)
+
+
 class WallsUpgrader:
     """OCR + clics pour améliorer en masse les remparts avec OR puis ELEXIR."""
 
@@ -214,8 +243,7 @@ class WallsUpgrader:
 
     def _init_capture(self):
         if self._reader is None:
-            import easyocr  # import lourd, lazy
-            self._reader = easyocr.Reader(['fr', 'en'])
+            self._reader = create_ocr_reader()
         if self._cam is None:
             self._cam = dxcam.create()
 

@@ -36,6 +36,12 @@ séparation nette **logique métier** (`coc_bot.core`) / **interface**
 - **Surveillance d'un clan dans le temps** : relevé daté des membres, des guerres
   classiques et de la Ligue des clans dans un classeur Excel par clan, avec
   **rapport HTML interactif** et **synchronisation multi-postes par Discord**.
+- **Navigation entre clans pour donner** (onglet 🔁 *Dons & Clans*) : le bot
+  quitte son clan, en rejoint un autre pris dans `All_Clans.parquet` ou par
+  recherche aléatoire, lit la discussion pour repérer les demandes de troupes et
+  donne, puis recommence. Chaque clan candidat est revérifié en direct via l'API
+  (type, effectif, prérequis d'entrée) et confronté aux données réelles du compte
+  (HDV, trophées, village de la nuit).
 - **Export Excel** des bases scannées.
 
 ---
@@ -389,6 +395,80 @@ d'envoi corrompu, montez `discord_sync_keep_versions` dans
 
 ---
 
+### Dons & Clans — navigation automatique entre clans
+
+L'onglet 🔁 enchaîne, pour chaque clan retenu, le cycle suivant : `ouvrir chat`
+→ `bannière du clan` → `quitter` → `valider quitter` → `rejoindre` (bouton
+affiché à la place du chat quand on n'a plus de clan) → onglet `rechercher un
+clan` → `barre de recherche` (le tag y est collé) → `rechercher` → `premier
+résultat` → `rejoindre` → `compris` → dons dans la zone de discussion →
+`fermer chat`.
+
+1. **Capturer les coordonnées** (*⚙ Définir les paramètres*) : l'assistant
+   demande les 12 boutons du cycle, trois **zones** (la discussion, la bande des
+   cartes de troupes et le compteur « Donner des troupes : X/Y » du panneau de
+   dons) et les 3 points de lecture du profil (`ouvrir profil`, `partager
+   l'identifiant`, `copier`) — les mêmes que l'onglet 🏰. Ouvrez le panneau de
+   dons avant de lancer l'assistant : les deux dernières zones ne sont visibles
+   que là.
+
+2. **Lire les infos du compte** (*👤 Lire les infos du joueur*) : le bot ouvre
+   le profil dans le jeu, copie le tag dans le presse-papiers puis interroge
+   `GET /players/{tag}` pour connaître HDV, palier classé, hôtel de nuit et
+   trophées de nuit. *⬇ MAJ classements* rafraîchit l'ordre des deux villages
+   (`Configs/league_tiers.json`, `Configs/builder_base_leagues.json`), qui sert
+   à situer le rang du compte.
+
+   > Depuis la refonte « classée », le village principal n'a plus de trophées
+   > (l'API renvoie 0) : le rang se lit dans `leagueTier` — les 37 paliers de
+   > `/leaguetiers`, d'*Unranked* à *Legend I*. Le critère « trophées exigés »
+   > d'un clan est donc ignoré pour les comptes concernés (rien à comparer) ;
+   > l'HDV et les trophées du village de la nuit restent vérifiés.
+
+3. **Choisir la source et les filtres** : base `All_Clans.parquet` lue clan par
+   clan (avec reprise à la position enregistrée) ou recherche aléatoire par
+   préfixe de 3 lettres ; type de clan (ouvert / sur invitation / fermé),
+   fourchette de membres, et la case *« Ne rejoindre que les clans que ce compte
+   peut rejoindre »* qui écarte les clans exigeant un HDV, des trophées ou des
+   trophées de nuit supérieurs à ceux du compte.
+
+4. **Lancer** : *🔁 LANCER la navigation*. La progression (position dans la base
+   et clans déjà rejoints) est enregistrée dans `Configs/clanhop_state.json` ;
+   *↺ Repartir du début* la remet à zéro.
+
+> Les chiffres du Parquet ne servent **jamais** à filtrer : ils datent du dernier
+> scan. Chaque candidat fait l'objet d'un `GET /clans/{tag}` juste avant d'être
+> retenu, pour voir si son type, son effectif ou ses exigences ont bougé depuis.
+
+#### Séquence de dons
+
+Une fois le chat du clan ouvert, la zone de discussion est lue par OCR à la
+recherche des mots-clés (`don`, `demande`…). Pour chaque demande trouvée :
+
+1. clic sur le bouton de la demande (la pastille verte du chat) ;
+2. dans le panneau qui s'ouvre, les cartes de troupes **en couleur** sont
+   cliquées une à une — une troupe disponible est colorée sur fond bleu, une
+   troupe indisponible est grisée, donc la détection se fait sur la saturation
+   des pixels plutôt qu'en reconnaissant les troupes ;
+3. après chaque clic, le compteur **« X/Y »** est relu : dès que X atteint Y, la
+   demande est servie et on passe à la suivante ;
+4. tous les *N* clics (paramètre *Clics avant vérification*), le bot vérifie que
+   le panneau est encore ouvert. Si oui, il joue la **macro de défilement**
+   (droite → gauche) pour atteindre les troupes hors cadre, et recommence —
+   jusqu'à *Défilements max* fois.
+
+Les seuils *Saturation min*, *Luminosité min* et *Aire min d'une carte* règlent
+la détection de couleur ; le bouton *🎴 Tester les cartes de dons* les vérifie
+panneau ouvert, sans rien cliquer.
+
+> **Moteur OCR** : le premier scan charge easyocr (une trentaine de secondes).
+> Sur cette installation, `torchvision` échoue à charger `image.pyd` — l'erreur
+> est bénigne, mais Windows affichait une boîte de dialogue modale qui figeait
+> l'application. Elle est désormais neutralisée le temps de l'import
+> (`walls.create_ocr_reader`), pour cet onglet comme pour les onglets 🧱 et ⬆.
+
+---
+
 ## Architecture du projet
 
 ```
@@ -415,6 +495,7 @@ ClashOfClans/
     │   ├── env_setup.py      # configuration interactive du .env (CustomTkinter)
     │   ├── playback.py       # LecteurPosition — rejeu de macros + DPI awareness
     │   ├── recorder.py       # EnregistreurPosition — enregistre les macros
+    │   ├── clan_hopper.py    # ClanHopper — navigation entre clans pour donner
     │   ├── walls.py          # WallsUpgrader — OCR + auto-remparts
     │   ├── upgrades.py       # UpgradesRunner — auto-améliorations (1er choix)
     │   ├── attack_session.py # run_attack_session() — session d'attaques multi-comptes
@@ -445,6 +526,10 @@ ClashOfClans/
 | `Configs/coords_config.json` | Coordonnées des clics utilisés par le module d'invitation (`coc_bot.core.coc_api`) |
 | `Configs/locations.json` | Cache local des `locationId` Supercell (pays + régions) |
 | `Configs/leagues.json` | Cache local des ligues Supercell (ordre de progression) |
+| `Configs/league_tiers.json` | Cache local des paliers classés du village principal (`/leaguetiers`, ordre de progression) |
+| `Configs/builder_base_leagues.json` | Cache local des ligues du village de la nuit (ordre de progression) |
+| `Configs/clanhop_config.json` | Coordonnées du cycle « Dons & Clans », zone de discussion, filtres et données du compte |
+| `Configs/clanhop_state.json` | Progression de la navigation : position dans `All_Clans.parquet` et clans déjà rejoints |
 | `player_tags.txt` | Liste de tags joueurs (édition manuelle) |
 | `All_Players.parquet`, `All_Clans.parquet` | Données scannées (générées) |
 | `Surveillance/<TAG>.xlsx` | Classeur de surveillance d'un clan (généré) — **données personnelles de joueurs, non versionné** |

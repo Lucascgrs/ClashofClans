@@ -1581,5 +1581,17 @@
         "id": 32000265,
         "name": "",
         "isCountry": false
+    },
+    {
+        "id": 32000266,
+        "name": "Europe",
+        "isCountry": true,
+        "countryCode": "EU"
+    },
+    {
+        "id": 32000267,
+        "name": "Asia",
+        "isCountry": true,
+        "countryCode": "AP"
     }
 ]
