@@ -47,7 +47,7 @@ from ..paths import (
 )
 from .surveillance import (
     SHEET_CALLS, SHEET_CLAN, SHEET_MEMBERS, SHEET_WARLOG, SHEET_WARS,
-    normalize_tag,
+    filtrer_alignements_fantomes, normalize_tag,
 )
 
 _TEMPLATE = os.path.join(os.path.dirname(__file__), "report_template.html")
@@ -463,8 +463,16 @@ def _rank_series(membres: pd.DataFrame) -> dict:
 
 def _war_matrix(guerres: pd.DataFrame, wars: list[dict],
                 players: list[dict]) -> dict:
-    """Détail attaques / étoiles par joueur et par guerre (guerres récentes)."""
-    recent = wars[-MATRIX_WARS:]
+    """Détail attaques / étoiles par joueur et par guerre (guerres récentes).
+
+    Les guerres dont **aucun** joueur n'a été relevé — celles que seul le
+    journal de clan documente, l'API n'en donnant jamais le détail — sont
+    écartées : elles n'ajouteraient qu'une colonne de tirets. Elles restent
+    comptées dans le bilan cumulé, qui, lui, ne travaille qu'au niveau clan."""
+    detaillees = ([] if guerres.empty
+                  else [w for w in wars
+                        if w["war_id"] in {_txt(v) for v in guerres["war_id"]}])
+    recent = detaillees[-MATRIX_WARS:]
     index = {w["war_id"]: i for i, w in enumerate(recent)}
     cells = {p["tag"]: [None] * len(recent) for p in players}
 
@@ -594,6 +602,14 @@ def build_report(clan_tag: str, output_path: str | None = None,
 
     membres, clan = book[SHEET_MEMBERS], book[SHEET_CLAN]
     guerres, journal = book[SHEET_WARS], book[SHEET_WARLOG]
+
+    # Le classeur peut encore porter des compositions abandonnées si aucune
+    # surveillance n'a tourné depuis : le rapport ne doit pas les compter.
+    guerres, fantomes = filtrer_alignements_fantomes(guerres)
+    if fantomes:
+        log(f"🔧 {fantomes} alignement(s) abandonné(s) avant le début de la "
+            f"guerre ignoré(s) (la prochaine surveillance les retirera du "
+            f"classeur).")
 
     wars = _build_wars(guerres, journal)
     cumul = _cumulative(wars)

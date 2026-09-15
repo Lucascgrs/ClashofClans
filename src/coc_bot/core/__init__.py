@@ -6,6 +6,7 @@ Chaque sous-module est autonome et expose une API claire :
 * :mod:`coc_bot.core.token_manager`  — génération/rafraîchissement du token API Supercell
 * :mod:`coc_bot.core.env_setup`      — configuration interactive du ``.env``
 * :mod:`coc_bot.core.playback`       — rejeu de macros souris/clavier (``LecteurPosition``)
+* :mod:`coc_bot.core.pause`          — pause / reprise globale des macros (``PAUSE``)
 * :mod:`coc_bot.core.recorder`       — enregistrement de macros (``EnregistreurPosition``)
 * :mod:`coc_bot.core.walls`          — auto-amélioration des remparts par OCR (``WallsUpgrader``)
 * :mod:`coc_bot.core.upgrades`       — auto-amélioration des premiers choix (``UpgradesRunner``)

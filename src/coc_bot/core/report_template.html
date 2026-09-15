@@ -697,8 +697,9 @@ function renderMatrix() {
   const m = DATA.matrix;
   if (!m.wars.length) return;
   const c = card("Détail par joueur et par guerre",
-    `Attaques réalisées / dues et étoiles obtenues, pour les ${m.wars.length} guerres les plus récentes. `
-    + "Survolez une cellule pour le pourcentage de destruction.");
+    `Attaques réalisées / dues et étoiles obtenues, pour les ${m.wars.length} guerres les plus `
+    + "récentes dont le détail joueur a été relevé. Survolez une cellule pour le pourcentage "
+    + "de destruction.");
 
   let h = '<table class="matrix"><thead><tr><th class="pname">Joueur</th>'
     + m.wars.map(w => `<th title="${esc((w.opponent || "") + " — " + (w.result || ""))}">${esc(w.label)}</th>`).join("")

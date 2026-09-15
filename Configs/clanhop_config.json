@@ -94,25 +94,25 @@
         }
     },
     "joueur": {
-        "tag": "#PPQU0LYVR",
-        "name": "P’tit Lulu",
+        "tag": "#89P8GLRL",
+        "name": "^_^",
         "townHallLevel": 18,
-        "trophies": 0,
-        "builderHallLevel": 9,
-        "builderBaseTrophies": 3078,
+        "trophies": 13,
+        "builderHallLevel": 10,
+        "builderBaseTrophies": 4906,
         "league": {
-            "id": 105000032,
-            "name": "Electro League 32",
+            "id": 105000030,
+            "name": "Dragon League 30",
             "iconUrls": {
-                "small": "https://api-assets.clashofclans.com/leaguetiers/125/iX8uNhG6jBcQATWFS8a0gtidGy9O1PRYtXZZMTtUK3U.png",
-                "large": "https://api-assets.clashofclans.com/leaguetiers/326/iX8uNhG6jBcQATWFS8a0gtidGy9O1PRYtXZZMTtUK3U.png"
+                "small": "https://api-assets.clashofclans.com/leaguetiers/125/g7m9aF8YoYj9b0olPsyT4eUIxyYEmkqr53wYxWmzpE4.png",
+                "large": "https://api-assets.clashofclans.com/leaguetiers/326/g7m9aF8YoYj9b0olPsyT4eUIxyYEmkqr53wYxWmzpE4.png"
             }
         },
         "builderBaseLeague": {
-            "id": 44000025,
-            "name": "Iron League I"
+            "id": 44000034,
+            "name": "Platinum League I"
         },
-        "expLevel": 215,
+        "expLevel": 211,
         "role": "coLeader",
         "clan": "#2R2YVCLJQ"
     },
@@ -129,23 +129,24 @@
         "eviter_revisites": true,
         "verifier_prerequis": true,
         "marge_trophees": 0,
-        "max_clans": 5,
+        "max_clans": 550,
         "deja_sans_clan": false,
         "inclure_diese": true,
         "valider_par_entree": false,
-        "delay_click": 1.0,
-        "delay_ecran": 2.0,
-        "delay_recherche": 2.5,
-        "delay_join": 3.0,
-        "delay_profil": 2.5,
+        "delay_click": 1.5,
+        "delay_ecran": 4.0,
+        "delay_recherche": 7.0,
+        "delay_join": 7.0,
+        "delay_profil": 7.0,
         "detect_dons": true,
-        "mots_cles_don": "Donner, doer, doxer, doner, dover, doxe, dovver, doxxer, d0ner, d0nner,d0xer,d0ver,d0vver,d0xxer",
+        "mots_cles_don": "Donner, doer, doxer, doner, dover, doxe, dovver, doxxer, d0ner, d0nner,d0xer,d0ver,d0vver,d0xxer, doxrer, dorxer, dorrer, dorer, dovrer, dorver, doxner, donxer",
         "attente_chat": 2.0,
         "relectures_chat": 3,
         "clics_avant_verif": 8,
         "max_slides": 3,
         "macro_slide": "defiler_dons.json",
-        "echap_apres_don": true,
+        "mots_cles_panneau": "donner, troupes",
+        "fermer_par_coin": true,
         "saturation_min": 90,
         "valeur_min": 70,
         "aire_min_carte": 1200,
@@ -156,6 +157,7 @@
         "aire_min_controle": 300,
         "attente_don": 0.0,
         "attente_sans_don": 0.5,
+        "echap_apres_don": true,
         "macro_don": "",
         "clics_par_demande": 1
     }

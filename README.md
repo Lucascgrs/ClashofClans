@@ -17,6 +17,10 @@ séparation nette **logique métier** (`coc_bot.core`) / **interface**
 
 - **Scan de joueurs et de clans** via l'API officielle Clash of Clans, avec filtres
   (HDV min, XP, trophées, dons, activité, pays). Sauvegarde incrémentale en Parquet.
+- **Jusqu'à 10 clés API en parallèle** : chaque clé a son propre quota (~80 req/s),
+  le débit est réparti et régulé automatiquement, les requêtes en échec sont
+  retentées sans laisser de trou, et la fenêtre **🔑 Clés API** montre
+  l'utilisation de chaque clé (voir [Clés API et débit](#clés-api-et-débit)).
 - **Recherche aléatoire de clans / joueurs** + **invitation automatique** (via
   `pyautogui` + `pyperclip`).
 - **Gestion multi-comptes** : sélection de profils, switch automatique entre comptes,
@@ -52,8 +56,9 @@ séparation nette **logique métier** (`coc_bot.core`) / **interface**
 - **Python 3.10+**
 - **Tesseract OCR** installé dans `C:\Program Files\Tesseract-OCR\` (utilisé par
   `COC.py` pour des relectures ponctuelles ; le reste de l'OCR passe par EasyOCR)
-- Un **token API Clash of Clans** (créé automatiquement par `coc_token_manager.py`
-  si vous fournissez vos identifiants — voir `.env`)
+- Un compte sur le **portail développeur Clash of Clans** : les clés API (jusqu'à
+  10) sont créées automatiquement par `token_manager.py` à partir de vos
+  identifiants — voir `.env`
 - Le jeu **affiché en plein écran à une résolution stable**, sinon les coordonnées
   capturées dans les macros et l'assistant ne correspondront plus
 
@@ -78,7 +83,7 @@ DEV_PASSWORD=...
 ```
 
 (Identifiants du portail développeur Supercell, utilisés par
-`coc_token_manager.py` pour générer/rafraîchir le token API.)
+`token_manager.py` pour créer/rafraîchir les clés API.)
 
 **Pas besoin de créer le `.env` à la main :** au premier lancement, si ces
 variables sont absentes, une petite fenêtre de configuration s'ouvre
@@ -99,8 +104,22 @@ python COC_App.py
 
 L'interface s'ouvre sur une **barre de navigation latérale** donnant accès aux
 écrans suivants (l'ancien système d'onglets a été remplacé) ; le gros bouton
-rouge **⛔ Arrêt d'urgence** et le sélecteur de thème (sombre/clair/système)
-restent toujours visibles en bas de la barre.
+rouge **⛔ Arrêt d'urgence**, le bouton **⏸ Pause macros** et le sélecteur de
+thème (sombre/clair/système) restent toujours visibles en bas de la barre.
+
+**Touches globales** — actives même quand le bot pilote la souris, réglables
+dans 🗂 Orchestration → *Arrêt d'urgence & pause* :
+
+- **F12** — arrêt d'urgence : coupe immédiatement toutes les automatisations ;
+- **F9** — pause / reprise des macros JSON, avec un bip à chaque appui (deux
+  notes descendantes = pause, montantes = reprise). La pause vaut pour toute
+  l'application (écran Jeu, sessions d'attaque, orchestration, dons…) : la
+  macro relâche les boutons et touches qu'elle tenait pour vous rendre la
+  main, puis reprend exactement où elle en était — souris replacée, glisser
+  et touches modificatrices ré-enfoncés. Une tâche qui n'est pas dans une
+  macro au moment de l'appui (attente entre deux attaques, OCR…) se fige dès
+  sa prochaine macro. Le bouton de la barre latérale passe à l'orange tant
+  que la pause est active.
 
 | Écran | Rôle |
 |---|---|
@@ -110,9 +129,46 @@ restent toujours visibles en bas de la barre.
 | 🧱 **Auto Remparts** | Configuration et lancement de l'amélioration automatique des remparts (OCR + clics) |
 | ⬆ **Auto Améliorations** | Amélioration du premier choix payable de la liste (or / élixir / élixir noir), configs nommées |
 | 👥 **Multi Compte** | Enchaînement de plusieurs comptes (switch → armée → attaques) avec rituel optionnel |
-| 🗂 **Orchestration** | Enchaînement / planification horaire de tâches, raccourci d'arrêt d'urgence |
+| 🗂 **Orchestration** | Enchaînement / planification horaire de tâches, touches d'arrêt d'urgence et de pause |
 | 📊 **Données** | Visualisation des parquets scannés, export Excel |
 | 📝 **Tags Joueurs** | Édition manuelle de la liste de tags joueurs |
+
+### Clés API et débit
+
+L'API limite le débit **par clé** (environ 80 requêtes/s chacune, mesuré avec
+`tests/banc_debit.py`). Toutes les requêtes du bot — scans de clans et de
+joueurs, mise à jour de joueurs, recherche aléatoire, surveillance, Dons &
+Clans, lecture de l'HDV — passent donc par un pool de clés (`core/cles_api.py`) :
+
+- **Clés** : « AutoKey », « AutoKey_2 »… « AutoKey_10 », créées pour votre IP
+  publique à la première requête et recréées si l'IP change. Le portail
+  autorise 10 clés par compte : les clés portant un autre nom ne sont jamais
+  touchées, mais elles réduisent le nombre de clés disponibles.
+- **Répartition** : chaque requête prend le prochain créneau libre parmi les
+  clés actives, à intervalles réguliers (pas de rafale).
+- **Aucun trou dans les données** : un 429 fait ralentir la clé et renvoie la
+  requête sur une autre ; une coupure réseau ou une erreur serveur est retentée
+  avec une attente croissante. Un préfixe ou un clan toujours en échec est remis
+  plus loin dans la file du scan (3 passages), puis gardé dans la liste « à
+  repasser » du scan suivant.
+- **Ajustement dynamique** : toutes les 2 s, le débit monte tant que tout va
+  bien et baisse sur 429, erreurs, latence en hausse ou processeur saturé
+  (threads en retard sur leur créneau). Le nombre de requêtes simultanées est
+  plafonné et s'ouvre progressivement : lors des mesures, ~225 connexions
+  ouvertes d'un coup faisaient échouer des connexions.
+
+Le bouton **🔑 Clés API** (barre latérale, ou carte *Scan incrémental*) ouvre
+une fenêtre qui affiche le débit total des 2 dernières minutes, une mini-courbe
+et l'état de chaque clé, la latence, le processeur de l'application et les
+connexions. On y règle le **nombre de clés**, la **limite par clé** et
+l'ajustement dynamique ; **⚡ Optimiser automatiquement** mesure la latence et le
+coût processeur d'une requête sur votre machine, en déduit le débit tenable (le
+plus petit entre le quota des clés, le processeur et le réseau), applique le
+résultat et active l'ajustement dynamique. Réglages enregistrés dans
+`Configs/api_keys_config.json`.
+
+> Un processus Python n'exécute son code que sur un cœur à la fois : sur un PC
+> modeste, c'est souvent le processeur qui limite le débit avant les clés.
 
 ### Surveillance d'un clan
 
@@ -210,7 +266,28 @@ inclus, aucune ressource réseau) qui s'ouvre dans le navigateur.
   reste distinguable plus loin.
 - **Effectif** du clan dans le temps.
 - **Deux tableaux colorés** : détail par joueur et par guerre, et dons par
-  joueur et par mois.
+  joueur et par mois. Le détail ne montre que les guerres **effectivement
+  relevées joueur par joueur** — celles que seul le journal de clan documente
+  n'ajouteraient qu'une colonne de tirets, l'API n'en donnant jamais le détail.
+
+> **Écriture du classeur** : chaque sauvegarde est écrite dans un fichier de
+> travail du même dossier (`<TAG>.xlsx.<pid>.tmp.xlsx`), mis en place d'un seul
+> bloc par `os.replace`, sous un verrou par classeur. Écrire directement sur le
+> `.xlsx` expose à le perdre : une interruption, ou deux surveillances lancées
+> en parallèle sur le même clan, laissent un fichier mi-ancien mi-nouveau
+> qu'aucun lecteur ne sait plus ouvrir (`Bad CRC-32 for file …`). Si un classeur
+> se trouve dans cet état, l'ouverture le répare toute seule : un `.xlsx` est
+> une archive ZIP, la sauvegarde **précédente** y est presque toujours encore
+> complète, et `reparer_classeur()` tronque le fichier juste après le dernier
+> index intégralement relisible — l'original étant conservé en `.corrompu`.
+
+> **Compositions abandonnées** : un joueur aligné pour une journée de LDC puis
+> retiré avant le début du round laissait une ligne orpheline dans le classeur —
+> le relevé suivant ne le mentionne plus, mais sa ligne restait et le comptait
+> comme un participant n'ayant pas attaqué. Ces lignes (relevé antérieur au
+> dernier connu pour cette guerre **et** sans aucune attaque) sont désormais
+> écartées, à la surveillance comme à la génération du rapport. Une ligne
+> portant une attaque n'est jamais supprimée.
 
 > **Deux échelles de ligues** cohabitent depuis le remaniement « ranked » du
 > jeu : la ligue **classée** (`leagueTier`, 37 paliers de « Squelette 1 » à
@@ -474,20 +551,34 @@ chat* fois tant qu'aucun texte ne sort — une discussion illisible n'est pas un
 discussion sans demande. Pour chaque demande trouvée :
 
 1. clic sur le bouton de la demande (la pastille verte du chat) ;
-2. dans le panneau qui s'ouvre, les cartes de troupes **en couleur** sont
-   cliquées une à une — une troupe disponible est colorée sur fond bleu, une
-   troupe indisponible est grisée, donc la détection se fait sur la saturation
-   des pixels plutôt qu'en reconnaissant les troupes ;
-3. après chaque clic, le compteur **« X/Y »** est relu : dès que X atteint Y, la
-   demande est servie et on passe à la suivante ; un compteur devenu illisible
-   signifie que le jeu a refermé le panneau, seul vrai signal d'arrêt ;
+2. le panneau de dons s'ouvre. Il porte deux informations, lues d'une seule
+   passe d'OCR : son **titre « Donner des troupes : X/Y »** et la bande des
+   **cartes de troupes**. Les cartes **en couleur** sont cliquées une à une, en
+   partant de la **droite** — la bande range les troupes de la plus basique à la
+   plus avancée, et ce sont les dernières qui rapportent le plus de points de
+   don. Une troupe disponible est colorée sur fond bleu, une troupe indisponible
+   est grisée, donc la détection se fait sur la saturation des pixels plutôt
+   qu'en reconnaissant les troupes ;
+3. **c'est la disparition du panneau qui dit que c'est fini** : le titre ne se
+   lit plus, tout ce qui pouvait être donné l'a été. Le repère est le *titre* et
+   non le « X/Y » — l'OCR bute bien plus souvent sur deux chiffres collés que
+   sur un mot, et un panneau jugé fermé à tort ferait abandonner un don en
+   cours. Les mots cherchés sont réglables (*Titre du panneau de dons*), et X
+   qui rejoint Y reste un raccourci d'arrêt ;
 4. **une vue entièrement grisée n'est pas une fin** — la bande des troupes
    défile, et d'autres cartes donnables attendent peut-être hors cadre. Tant que
-   le panneau est ouvert et que X n'a pas atteint Y, le bot joue donc la **macro
-   de défilement** (droite → gauche) et recommence, jusqu'à *Défilements max*
-   fois. *Clics sans effet max* borne les clics qui ne font pas avancer le
-   compteur : au-delà, la vue est jugée épuisée et on défile — une carte colorée
-   qui ne réagit pas ne doit pas faire boucler le bot.
+   le panneau est là, le bot joue donc la **macro de défilement**
+   (droite → gauche) et recommence : les cartes qui apparaissent peuvent être
+   colorées ou grises, et si tout est encore gris il défile de nouveau, jusqu'à
+   *Défilements max* fois. *Clics sans effet max* n'est qu'un garde-fou : au-delà
+   de ce nombre de clics qui ne font pas avancer le compteur, la vue est jugée
+   épuisée et on défile — une tache colorée qui ne réagit pas ne doit pas faire
+   boucler le bot ;
+5. panneau disparu ou défilements épuisés, le bot le **referme d'un clic en
+   (0, 0)** — il se ferme dès qu'on clique en dehors de lui, et le coin de
+   l'écran est le seul point dont on soit sûr qu'il ne déclenche rien d'autre.
+   S'il résiste, ÉCHAP prend le relais : le laisser ouvert masquerait le chat,
+   que l'étape suivante doit justement relire.
 
 Le chat n'affiche que ses derniers messages. Une fois le champ visible scanné
 **et** servi, le bot regarde donc la zone du **petit bouton vert « demandes plus
@@ -530,17 +621,20 @@ ClashOfClans/
 │   ├── Base/ Upgrades/ Research/ MultiCompte/   # configs nommées (générées)
 ├── Orchestration/        # scénarios d'enchaînement + réglages (générés)
 ├── Surveillance/         # classeurs et rapports par clan (générés, non versionnés)
+├── tests/                # tests + bancs de mesure du débit (python -m unittest discover -s tests -t .)
 └── src/coc_bot/
     ├── __main__.py       # `python -m coc_bot`
     ├── paths.py          # chemins ABSOLUS centralisés (+ COC_BOT_DATA_DIR)
     ├── core/             # logique métier (indépendante de l'UI)
     │   ├── coc_api.py        # API Clash of Clans : scans, filtres, invitations, exports
+    │   ├── cles_api.py       # pool de clés API : répartition, régulation, nouveaux essais
     │   ├── surveillance.py   # historique horodaté d'un clan (membres, guerres, LDC)
     │   ├── reporting.py      # rapport HTML interactif autonome (+ report_template.html)
     │   ├── discord_sync.py   # partage du classeur entre postes via un salon Discord
-    │   ├── token_manager.py  # génération/rafraîchissement du token API Supercell
+    │   ├── token_manager.py  # création/rafraîchissement des clés API (jusqu'à 10)
     │   ├── env_setup.py      # configuration interactive du .env (CustomTkinter)
     │   ├── playback.py       # LecteurPosition — rejeu de macros + DPI awareness
+    │   ├── pause.py          # PAUSE — pause/reprise globale des macros (touche + bip)
     │   ├── recorder.py       # EnregistreurPosition — enregistre les macros
     │   ├── clan_hopper.py    # ClanHopper — navigation entre clans pour donner
     │   ├── walls.py          # WallsUpgrader — OCR + auto-remparts
@@ -549,9 +643,10 @@ ClashOfClans/
     │   ├── multi_account.py  # run_multi_session() — enchaînement multi-comptes
     │   └── orchestration.py  # enchaînement/planification + arrêt d'urgence
     └── ui/               # interface CustomTkinter
-        ├── app.py            # fenêtre principale (nav latérale, log, arrêt d'urgence)
+        ├── app.py            # fenêtre principale (nav latérale, log, arrêt d'urgence, pause)
         ├── theme.py          # couleurs, polices, espacement
         ├── widgets.py        # cartes, journaux, assistants de capture, listes…
+        ├── fenetre_cles.py   # fenêtre « 🔑 Clés API » : utilisation et réglages du débit
         └── views/            # un écran par module (scan, surveillance, game, walls…)
             └── scan_common.py # filtres + pays + scan incrémental (écran Scanner)
 ```
@@ -577,11 +672,12 @@ ClashOfClans/
 | `Configs/builder_base_leagues.json` | Cache local des ligues du village de la nuit (ordre de progression) |
 | `Configs/clanhop_config.json` | Coordonnées du cycle « Dons & Clans », zone de discussion, filtres et données du compte |
 | `Configs/clanhop_state.json` | Progression de la navigation : position dans `All_Clans.parquet` et clans déjà rejoints |
+| `Configs/api_keys_config.json` | Pool de clés API : nombre de clés, limite par clé (req/s), ajustement dynamique (fenêtre 🔑 Clés API) |
 | `player_tags.txt` | Liste de tags joueurs (édition manuelle) |
 | `All_Players.parquet`, `All_Clans.parquet` | Données scannées (générées) |
 | `Surveillance/<TAG>.xlsx` | Classeur de surveillance d'un clan (généré) — **données personnelles de joueurs, non versionné** |
 | `Surveillance/<TAG>_rapport.html` | Rapport graphique autonome (généré) |
-| `Orchestration/orchestration_settings.json` | Réglages : dernier clan surveillé, raccourci d'arrêt, salon Discord et purge des versions |
+| `Orchestration/orchestration_settings.json` | Réglages : dernier clan surveillé, touches d'arrêt et de pause, salon Discord et purge des versions |
 | `.env` | Identifiants Supercell **et token du bot Discord** (**ne jamais committer**) |
 
 > `walls_config.json`, `attack_config.json` et `coords_config.json` sont créés
@@ -706,6 +802,8 @@ Ces fichiers sont déjà exclus par `.gitignore`.
 | Scroll dans le mauvais sens | Souris configurée à l'envers | Passer `scroll_amount` à une valeur positive |
 | Rituel remparts ne trouve jamais le mot | Police OCR confond `e`/`c`, le mot est tronqué | Réduire `keyword` à un préfixe court (ex. `"remp"`) |
 | Token API expire | Variable d'environnement absente | Vérifier `.env`, relancer pour régénérer le token |
+| Débit plus faible qu'attendu | Processeur ou connexion saturés, ou places du compte prises par d'autres clés | Fenêtre 🔑 Clés API : état, tuiles *Processeur* et *Latence*, puis **⚡ Optimiser automatiquement** |
+| « Compte plein » dans le journal | 10 clés existent déjà sur le portail sous d'autres noms | Supprimer les clés inutiles sur developer.clashofclans.com (`python tests/banc_debit.py --nettoyer` pour les clés de test) |
 | Discord : `Accès refusé (403)` | Salon privé sans le bot dans ses permissions (cause n°1) | Modifier le salon → Permissions → *Ajouter des membres ou des rôles* → le bot → les 4 droits |
 | Discord : `Introuvable (404)` | Identifiant du **serveur** ou d'une catégorie copié à la place de celui du salon | Clic droit sur le salon textuel lui-même → *Copier l'identifiant* |
 | Discord : le bot est hors ligne | Comportement normal (API REST, pas de passerelle) | Rien à faire, la synchronisation fonctionne |

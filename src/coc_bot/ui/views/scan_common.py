@@ -47,9 +47,10 @@ _BTN_PLAYERS = "Lancer Scan Joueurs"
 _BTN_CLANS   = "Lancer Scan Clans"
 _BTN_RUNNING = "Scan en cours…"
 
-# Liste de repli des ligues (classiques, ordonnées) si leagues.json est absent.
-# Le bouton « MAJ Ligues (API) » remplace cette liste par la liste réelle et à
-# jour (nouveau système de ligues classées numérotées inclus).
+# Liste de repli des ligues (anciennes, ordonnées) si aucun fichier de ligues
+# n'est présent. Le grade minimum s'appuie normalement sur les paliers classés
+# actuels (league_tiers.json, Unranked → Legend I) ; le bouton
+# « MAJ Ligues (API) » les récupère depuis /leaguetiers.
 FALLBACK_LEAGUES = [
     {"id": 29000000, "name": "Unranked"},
     {"id": 29000001, "name": "Bronze League III"},
@@ -77,10 +78,8 @@ FALLBACK_LEAGUES = [
 ]
 
 
-def load_leagues() -> list:
-    """Charge la liste ordonnée des ligues depuis leagues.json (hors-ligne,
-    sans importer coc_api). Repli : les ligues classiques."""
-    path = paths.LEAGUES_FILE
+def _read_leagues(path: str) -> list:
+    """Liste ordonnée [{id, name}] lue dans un fichier JSON (vide si absent)."""
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -89,7 +88,16 @@ def load_leagues() -> list:
                 return [{"id": it.get("id"), "name": it.get("name")} for it in data]
         except Exception:
             pass
-    return [dict(lg) for lg in FALLBACK_LEAGUES]
+    return []
+
+
+def load_leagues() -> list:
+    """Charge la liste ordonnée des grades (hors-ligne, sans importer coc_api),
+    du plus actuel au plus ancien : paliers classés (league_tiers.json), puis
+    ancienne liste (leagues.json), puis repli codé en dur."""
+    return (_read_leagues(paths.LEAGUE_TIERS_FILE)
+            or _read_leagues(paths.LEAGUES_FILE)
+            or [dict(lg) for lg in FALLBACK_LEAGUES])
 
 
 def load_locations() -> dict:
@@ -220,6 +228,13 @@ class IncrementalScanPanel(ctk.CTkFrame):
         self.btn_clans.pack(side="left", padx=(0, theme.PAD_S))
         ctk.CTkLabel(s2, text="Limite :").pack(side="left", padx=(0, 4))
         ctk.CTkEntry(s2, textvariable=self.vars["scan_limit_clans"], width=90).pack(side="left")
+        # Le débit des scans est réparti sur les clés API (jusqu'à 10) : suivi et
+        # réglages dans la fenêtre dédiée.
+        ctk.CTkButton(scan.body, text="🔑 Clés API — débit et réglages", width=240,
+                      fg_color="transparent", border_width=1,
+                      text_color=("gray15", "gray85"),
+                      command=self.app.open_api_keys_window).grid(
+            row=2, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
     def _build_progress(self):
         prog = Card(self, title="Progression du scan")
@@ -379,9 +394,13 @@ class IncrementalScanPanel(ctk.CTkFrame):
 
     def _update_leagues(self):
         def task():
-            self.app.log("Mise à jour des ligues (API)… Patientez…")
+            self.app.log("Mise à jour des grades (paliers classés) (API)… Patientez…")
             try:
                 from ...core import coc_api as COC
+                paliers = COC.fetch_league_tiers()
+                self.app.log(f"{len(paliers)} paliers classés enregistrés.")
+                # L'ancienne liste reste utile comme repli pour les données
+                # antérieures à la refonte « classée ».
                 COC.fetch_all_leagues()
                 self._load_league_options()
                 current = self.v_min_league.get()
@@ -391,8 +410,8 @@ class IncrementalScanPanel(ctk.CTkFrame):
                     if current not in self.league_names:
                         self.v_min_league.set(NO_LEAGUE)
                 self.after(0, refresh_combo)
-                self.app.log(f"Terminé : {len(self.league_names)} ligues chargées.")
-                messagebox.showinfo("Succès", "Liste des ligues (grades) mise à jour !")
+                self.app.log(f"Terminé : {len(self.league_names)} grades chargés.")
+                messagebox.showinfo("Succès", "Liste des grades (ligues) mise à jour !")
             except Exception as e:
                 self.app.log(f"Erreur MAJ Ligues : {e}")
 

@@ -104,24 +104,31 @@ class OrchestrationView(BaseView):
                                        text_color=theme.ACCENT, anchor="w")
         self.lbl_status.grid(row=1, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
-        # --- Raccourci d'arrêt d'urgence -------------------------------
-        emerg = Card(body, title="🚨 Arrêt d'urgence")
+        # --- Raccourcis globaux : arrêt d'urgence + pause des macros ---
+        emerg = Card(body, title="🚨 Arrêt d'urgence & pause")
         emerg.pack(fill="x", padx=theme.PAD, pady=(0, theme.PAD_S))
         erow = ctk.CTkFrame(emerg.body, fg_color="transparent")
         erow.grid(row=0, column=0, sticky="ew")
         ctk.CTkButton(erow, text="⛔ TOUT ARRÊTER MAINTENANT",
                       fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
                       command=self.app.emergency_stop_all).pack(side="left")
-        krow = ctk.CTkFrame(emerg.body, fg_color="transparent")
-        krow.grid(row=1, column=0, sticky="ew", pady=(theme.PAD_S, 0))
-        ctk.CTkLabel(krow, text="Raccourci clavier global :").pack(side="left", padx=(0, 6))
         self.v_hotkey = tk.StringVar(value=self.app.stop_hotkey)
-        ctk.CTkEntry(krow, textvariable=self.v_hotkey, width=180).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(krow, text="Appliquer", width=100, command=self._apply_hotkey).pack(side="left")
+        self.v_pause_hotkey = tk.StringVar(value=self.app.pause_hotkey)
+        for i, (label, var, command) in enumerate([
+                ("Touche d'arrêt d'urgence :", self.v_hotkey, self._apply_hotkey),
+                ("Touche pause / reprise des macros :", self.v_pause_hotkey,
+                 self._apply_pause_hotkey)], start=1):
+            krow = ctk.CTkFrame(emerg.body, fg_color="transparent")
+            krow.grid(row=i, column=0, sticky="ew", pady=(theme.PAD_S, 0))
+            ctk.CTkLabel(krow, text=label, width=250, anchor="w").pack(side="left", padx=(0, 6))
+            ctk.CTkEntry(krow, textvariable=var, width=180).pack(side="left", padx=(0, 6))
+            ctk.CTkButton(krow, text="Appliquer", width=100, command=command).pack(side="left")
         hint_label(emerg.body,
-                   "Format pynput : « <f12> » ou « <ctrl>+<shift>+s ». La coupure est "
-                   "immédiate, même quand la souris est pilotée par le bot."
-                   ).grid(row=2, column=0, sticky="w", pady=(theme.PAD_S, 0))
+                   "Format pynput : « <f12> » ou « <ctrl>+<shift>+s ». Touches globales, actives "
+                   "même quand la souris est pilotée par le bot. L'arrêt coupe tout ; la pause "
+                   "fige les macros JSON en cours (bip à chaque appui) et les relance là où "
+                   "elles en étaient."
+                   ).grid(row=3, column=0, sticky="w", pady=(theme.PAD_S, 0))
 
         # --- Journal ---------------------------------------------------
         logc = Card(body, title="Journal d'orchestration")
@@ -315,12 +322,21 @@ class OrchestrationView(BaseView):
             messagebox.showerror("Erreur", str(e))
 
     def _apply_hotkey(self):
-        new = self.v_hotkey.get().strip()
+        self._appliquer_raccourci(self.v_hotkey, self.app.apply_stop_hotkey,
+                                  "d'arrêt d'urgence", "<f12>")
+
+    def _apply_pause_hotkey(self):
+        self._appliquer_raccourci(self.v_pause_hotkey, self.app.apply_pause_hotkey,
+                                  "de pause / reprise", "<f9>")
+
+    def _appliquer_raccourci(self, var, appliquer, nom, exemple):
+        new = var.get().strip()
         if not new:
-            messagebox.showwarning("Raccourci", "Saisissez un raccourci (ex. <f12>).")
+            messagebox.showwarning("Raccourci", f"Saisissez un raccourci (ex. {exemple}).")
             return
-        if self.app.apply_stop_hotkey(new):
-            messagebox.showinfo("Raccourci", f"Raccourci d'arrêt d'urgence : {new}")
-        else:
-            messagebox.showerror("Raccourci invalide",
-                                 "Format pynput attendu, ex. <f12> ou <ctrl>+<shift>+s.")
+        try:
+            appliquer(new)
+        except ValueError as e:
+            messagebox.showerror("Raccourci invalide", str(e))
+            return
+        messagebox.showinfo("Raccourci", f"Raccourci {nom} : {new}")

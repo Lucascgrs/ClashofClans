@@ -68,8 +68,13 @@ accepte encore de donner.
 
 from __future__ import annotations
 
+import glob
+import io
 import logging
 import os
+import shutil
+import threading
+import zipfile
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -306,6 +311,68 @@ def _assign(df: pd.DataFrame, mask, column: str, value) -> None:
     df.loc[mask, column] = value
 
 
+#: Un seul écrivain à la fois par classeur. Le GUI lance ses automatisations
+#: dans des threads : deux sauvegardes simultanées du même fichier
+#: entrelaceraient leurs octets, et le classeur devient illisible
+#: (« Bad CRC-32 for file … »).
+_VERROUS: dict[str, threading.Lock] = {}
+_VERROUS_LOCK = threading.Lock()
+
+
+def _verrou(path: str) -> threading.Lock:
+    """Verrou d'écriture propre à un chemin de classeur."""
+    cle = os.path.normcase(os.path.abspath(path))
+    with _VERROUS_LOCK:
+        return _VERROUS.setdefault(cle, threading.Lock())
+
+
+def reparer_classeur(path: str, log: Callable = logging.info) -> Optional[str]:
+    """Récupère un classeur dont la fin d'écriture a été corrompue.
+
+    Un fichier .xlsx est une archive ZIP : chaque sauvegarde en écrit une
+    nouvelle, terminée par un index. Une sauvegarde interrompue — ou deux
+    sauvegardes concurrentes — laisse un fichier où l'index le plus récent
+    décrit des données qui n'ont jamais été écrites, d'où le « Bad CRC-32 ».
+    L'index **précédent**, lui, est souvent encore intact plus haut dans le
+    fichier, et décrit une version complète et cohérente du classeur.
+
+    On cherche donc, du plus récent au plus ancien, un index dont **toutes** les
+    entrées se relisent, et on tronque le fichier juste après. L'original est
+    conservé sous ``<nom>.corrompu``. Retourne le chemin de la sauvegarde, ou
+    ``None`` si rien n'était récupérable."""
+    with open(path, "rb") as f:
+        data = f.read()
+
+    # Fins d'index ZIP (« End Of Central Directory »), de la plus récente à la
+    # plus ancienne : la dernière est celle qui échoue, les précédentes sont
+    # les sauvegardes que les écritures suivantes n'ont pas recouvertes.
+    fins = [i for i in range(len(data) - 22, -1, -1)
+            if data[i:i + 4] == b"PK\x05\x06"]
+    for fin in fins:
+        candidat = data[:fin + 22]
+        try:
+            with zipfile.ZipFile(io.BytesIO(candidat)) as z:
+                noms = z.namelist()
+                for nom in noms:
+                    z.read(nom)
+        except (zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, ValueError,
+                RuntimeError, NotImplementedError):
+            continue
+        if not noms:
+            continue
+
+        sauvegarde = path + ".corrompu"
+        shutil.copy2(path, sauvegarde)
+        with open(path, "wb") as f:
+            f.write(candidat)
+        log(f"🔧 Classeur réparé : {len(candidat)} octets conservés sur "
+            f"{len(data)}, {len(noms)} entrée(s) relues. Fichier d'origine "
+            f"gardé sous {os.path.basename(sauvegarde)}.")
+        return sauvegarde
+
+    return None
+
+
 class Workbook:
     """Classeur de surveillance chargé en mémoire, écrit **une seule fois**.
 
@@ -324,7 +391,14 @@ class Workbook:
         if os.path.exists(path):
             # Une lecture en échec ne doit PAS être silencieuse : partir d'un
             # classeur vide reviendrait à écraser les données existantes.
-            self.sheets = pd.read_excel(path, sheet_name=None)
+            try:
+                self.sheets = pd.read_excel(path, sheet_name=None)
+            except zipfile.BadZipFile as e:
+                # Sauvegarde interrompue : la version précédente est presque
+                # toujours encore présente dans le fichier.
+                if reparer_classeur(path) is None:
+                    raise
+                self.sheets = pd.read_excel(path, sheet_name=None)
 
     def get(self, sheet: str) -> pd.DataFrame:
         """Feuille demandée (DataFrame vide si elle n'existe pas encore)."""
@@ -363,7 +437,16 @@ class Workbook:
         return len(self.sheets[sheet]) - before, updated
 
     def save(self) -> None:
-        """Écrit le classeur complet (sans effet si rien n'a changé)."""
+        """Écrit le classeur complet (sans effet si rien n'a changé).
+
+        L'écriture passe par un fichier temporaire du même dossier, mis en place
+        d'un seul bloc par ``os.replace``. Écrire directement sur le classeur
+        expose à le perdre : une interruption, ou une seconde sauvegarde lancée
+        en parallèle, laisse un fichier mi-ancien mi-nouveau qu'aucun lecteur ne
+        sait plus ouvrir (« Bad CRC-32 »). Ici un lecteur voit toujours l'ancien
+        classeur ou le nouveau, jamais un mélange, et un échec en cours de route
+        laisse l'original intact.
+        """
         if not self.dirty:
             return
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -371,10 +454,34 @@ class Workbook:
         # relues puis réécrites telles quelles : réécrire tout le fichier ne
         # doit jamais faire perdre le travail de l'utilisateur.
         extras = [n for n in self.sheets if n not in _SHEET_ORDER]
-        with pd.ExcelWriter(self.path, engine="openpyxl", mode="w") as writer:
-            for name in list(_SHEET_ORDER) + extras:
-                if name in self.sheets:
-                    self.sheets[name].to_excel(writer, sheet_name=name, index=False)
+        with _verrou(self.path):
+            # Un plantage antérieur a pu laisser un fichier de travail. Il est
+            # inerte — il n'a jamais remplacé le classeur — mais autant ne pas
+            # les accumuler. Celui qu'une autre application est en train
+            # d'écrire est verrouillé par Windows, donc épargné.
+            for reste in glob.glob(f"{self.path}.*.tmp.xlsx"):
+                try:
+                    os.remove(reste)
+                except OSError:
+                    pass
+
+            # Le PID distingue deux applications lancées en même temps ; le
+            # verrou suffit aux threads d'une seule. L'extension .xlsx est
+            # imposée : pandas refuse d'écrire du Excel sous un autre suffixe.
+            provisoire = f"{self.path}.{os.getpid()}.tmp.xlsx"
+            try:
+                with pd.ExcelWriter(provisoire, engine="openpyxl", mode="w") as writer:
+                    for name in list(_SHEET_ORDER) + extras:
+                        if name in self.sheets:
+                            self.sheets[name].to_excel(writer, sheet_name=name,
+                                                       index=False)
+                os.replace(provisoire, self.path)
+            except BaseException:
+                try:
+                    os.remove(provisoire)
+                except OSError:
+                    pass
+                raise
         self.dirty = False
 
 
@@ -722,6 +829,44 @@ _WARLOG_FINALS = ("result", "clan_stars", "clan_destruction", "opponent_stars",
                   "attacks_per_member")
 
 
+def filtrer_alignements_fantomes(guerres: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Écarte les joueurs alignés pour une guerre puis retirés avant son début.
+
+    Une guerre relevée en **préparation** puis re-relevée une fois lancée laisse
+    une ligne orpheline pour chaque joueur que le clan a sorti de la composition
+    entre-temps : le relevé suivant ne le mentionne plus, mais sa ligne, elle,
+    reste — et le rapport le compte alors comme un participant qui n'aurait pas
+    attaqué, alors qu'il n'a jamais figuré dans la composition finale.
+
+    Sont donc retirées les lignes issues d'un relevé **antérieur** au dernier
+    connu pour cette guerre **et sans aucune attaque**. Un joueur toujours
+    aligné est forcément re-décrit par le relevé le plus récent, donc conservé ;
+    et la condition sur les attaques garantit qu'aucune participation réelle ne
+    peut disparaître, même si l'API répondait un jour une composition tronquée.
+
+    Retourne la feuille filtrée et le nombre de lignes écartées."""
+    besoin = {"war_id", "collected_at", "attacks_done"}
+    if guerres.empty or not besoin <= set(guerres.columns):
+        return guerres, 0
+
+    dernier = guerres.groupby("war_id")["collected_at"].transform("max")
+    attaques = pd.to_numeric(guerres["attacks_done"], errors="coerce").fillna(0)
+    fantomes = (guerres["collected_at"].astype(str) < dernier.astype(str)) & (attaques <= 0)
+    nb = int(fantomes.sum())
+    if not nb:
+        return guerres, 0
+    return guerres[~fantomes].reset_index(drop=True), nb
+
+
+def _prune_lineup_ghosts(book: Workbook) -> int:
+    """Applique :func:`filtrer_alignements_fantomes` à la feuille des guerres."""
+    garde, nb = filtrer_alignements_fantomes(book.get(SHEET_WARS))
+    if nb:
+        book.sheets[SHEET_WARS] = garde
+        book.dirty = True
+    return nb
+
+
 def _migrate_war_ids(clan_tag: str, book: Workbook) -> int:
     """Recale les ``war_id`` classiques hérités du format à la seconde.
 
@@ -1051,6 +1196,13 @@ def surveiller_clan(clan_tag: str, membres: bool = True, guerre: bool = True,
         except Exception as e:
             erreurs.append(f"guerres_ouvertes: {e}")
             log(f"❌ Étape « guerres ouvertes » en échec : {e}")
+
+    # Après coup seulement : une composition ne se révèle abandonnée qu'au
+    # relevé suivant, celui qui ne mentionne plus le joueur.
+    fantomes = _prune_lineup_ghosts(book)
+    if fantomes:
+        log(f"🔧 {fantomes} alignement(s) abandonné(s) avant le début de la "
+            f"guerre écarté(s).")
 
     resume["erreurs"] = " | ".join(erreurs)
     resume["fichier"] = path

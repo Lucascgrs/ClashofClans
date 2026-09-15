@@ -166,7 +166,11 @@ CLANHOP_DEFAULT_CONFIG = {
         "clics_avant_verif": 5,           # clics sur des cartes avant re-vérification
         "max_slides":        3,           # nb de défilements de la bande de troupes
         "macro_slide":       "",          # macro Actions/*.json : défilement droite→gauche
-        "echap_apres_don":   True,        # ÉCHAP si le panneau reste ouvert
+        # Le panneau de dons est reconnu à son TITRE, pas au « X/Y » :
+        # deux chiffres collés se lisent bien moins sûrement qu'un mot,
+        # et un titre jugé illisible ferait abandonner un don en cours.
+        "mots_cles_panneau": "donner, troupes",
+        "fermer_par_coin":   True,        # clic en (0,0) pour refermer le panneau
         # Détection des cartes DONNABLES : elles sont en couleur (fond bleu),
         # les indisponibles sont grisées. Un pixel est « coloré » si sa
         # saturation et sa luminosité dépassent ces seuils (HSV, 0-255) ; une
@@ -444,38 +448,23 @@ def fetch_builder_base_leagues(limit: int = 100) -> list[dict]:
 # =============================================================================
 # ACCÈS API LÉGER (sans importer coc_api)
 # =============================================================================
-# Comme dans l'onglet Base : importer coc_api déclenche la création/rotation du
-# jeton dès l'import (et une fenêtre bloquante si le .env est vide). Les écrans
-# qui ne font que LIRE une info doivent rester légers.
+# Comme dans l'onglet Base : importer coc_api est lourd et prépare les clés dès
+# l'import. Les écrans qui ne font que LIRE une info passent directement par le
+# pool de clés (cles_api), léger et partagé avec les scans ; sans identifiants
+# dans le .env, aucune fenêtre bloquante ne s'ouvre.
 
-def _api_headers() -> Optional[dict]:
+def _api_get(path: str, params: dict = None) -> Optional[dict]:
+    """``GET https://api.clashofclans.com/v1{path}`` — ``None`` si indisponible."""
     try:
         from dotenv import load_dotenv
         load_dotenv(ENV_FILE)
         if not (os.getenv("DEV_EMAIL") and os.getenv("DEV_PASSWORD")):
             return None
-        from .token_manager import get_or_create_token
-        token = get_or_create_token()
-        return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        from .cles_api import API_URL, gestionnaire
+        r = gestionnaire().get(f"{API_URL}{path}", params)
+        return r.json() if r is not None else None
     except Exception:
         return None
-
-
-def _api_get(path: str, params: dict = None) -> Optional[dict]:
-    """``GET https://api.clashofclans.com/v1{path}`` — ``None`` si indisponible."""
-    import requests
-
-    headers = _api_headers()
-    if headers is None:
-        return None
-    try:
-        r = requests.get(f"https://api.clashofclans.com/v1{path}",
-                         headers=headers, params=params, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-    except Exception:
-        pass
-    return None
 
 
 def fetch_player(tag: str) -> Optional[dict]:
@@ -590,8 +579,8 @@ class ClanPicker:
     aujourd'hui.
     """
 
-    #: Nombre de candidats vérifiés en parallèle (le limiteur de coc_api tient
-    #: la cadence de 10 req/s).
+    #: Nombre de candidats vérifiés en parallèle (le pool de clés API tient la
+    #: cadence, voir cles_api).
     BATCH = 25
 
     def __init__(self, params: dict, state: dict, joueur: dict = None,
@@ -1065,24 +1054,72 @@ class ClanHopper:
     _COMPTEUR_RES = (re.compile(r"(\d+)\s*/\s*(\d+)"),
                      re.compile(r"(\d+)\s*[l|I]\s*(\d+)"))
 
-    def lire_compteur(self):
-        """(X, Y) du « Donner des troupes : X/Y », (None, None) si illisible."""
-        textes = [ligne["texte"].replace(" ", "") for ligne in self._lire_zone("compteur")]
+    #: Point cliqué pour refermer le panneau de dons : il se referme dès qu'on
+    #: clique EN DEHORS de lui, et le coin de l'écran est le seul endroit dont on
+    #: soit sûr qu'il ne déclenche rien d'autre.
+    COIN_FERMETURE = (0, 0)
+
+    def _mots_panneau(self) -> list:
+        raw = self.params.get(
+            "mots_cles_panneau",
+            CLANHOP_DEFAULT_CONFIG["params"]["mots_cles_panneau"])
+        return [_normalize(m) for m in (raw or "").split(",") if m.strip()]
+
+    def etat_panneau(self) -> tuple:
+        """(panneau ouvert, X, Y) — UNE seule passe d'OCR sur la zone du compteur.
+
+        Le panneau de dons porte deux informations, et cette lecture unique les
+        rend toutes les deux : son titre « Donner des troupes » et le compteur
+        « X/Y » des troupes encore demandées.
+
+        C'est la **présence du titre** qui dit si le panneau est encore là, pas
+        celle du « X/Y » : l'OCR bute bien plus souvent sur deux chiffres collés
+        que sur un mot, et conclure à tort « panneau fermé » ferait abandonner un
+        don en cours. Le compteur, lui, reste un repère — X qui rejoint Y veut
+        dire qu'il n'y a plus rien à donner — mais le jeu referme de toute façon
+        le panneau tout seul dans ce cas.
+        """
+        textes = [ligne["texte"] for ligne in self._lire_zone("compteur")]
+        donnes = demandees = None
         for motif in self._COMPTEUR_RES:
             for texte in textes:
-                m = motif.search(texte)
+                m = motif.search(texte.replace(" ", ""))
                 if m:
-                    return int(m.group(1)), int(m.group(2))
-        return None, None
+                    donnes, demandees = int(m.group(1)), int(m.group(2))
+                    break
+            if donnes is not None:
+                break
+        mots = self._mots_panneau()
+        titre = any(mot in _normalize(texte) for texte in textes for mot in mots)
+        return (titre or donnes is not None), donnes, demandees
+
+    def lire_compteur(self):
+        """(X, Y) du « Donner des troupes : X/Y », (None, None) si illisible."""
+        _ouvert, donnes, demandees = self.etat_panneau()
+        return donnes, demandees
 
     def panneau_dons_ouvert(self) -> bool:
-        """Le panneau de dons est-il encore affiché ?
+        """Le titre « Donner des troupes » est-il encore lisible à l'écran ?"""
+        return self.etat_panneau()[0]
 
-        Le compteur « X/Y » n'existe que dans ce panneau : le lire suffit à
-        savoir si le don est toujours en cours ou si le jeu l'a refermé.
+    def fermer_panneau_dons(self) -> None:
+        """Referme le panneau de dons d'un clic dans le coin de l'écran.
+
+        Le laisser ouvert décalerait tout le reste du cycle : l'étape suivante
+        clique dans le chat, qui est justement caché derrière lui. Si le panneau
+        résiste au clic, ÉCHAP prend le relais.
         """
-        x, _y = self.lire_compteur()
-        return x is not None
+        if not self.params.get("fermer_par_coin", True):
+            return
+        x, y = self.COIN_FERMETURE
+        self._click_xy(x, y, delay=self._delay("delay_ecran"))
+        if self._zone("compteur") is None:
+            return                      # sans compteur, rien à vérifier
+        if self.panneau_dons_ouvert():
+            self.log("    panneau toujours ouvert après le clic de fermeture "
+                     "— ÉCHAP.")
+            pyautogui.press("esc")
+            self._sleep(self._delay("delay_ecran"))
 
     # ---------- étapes du cycle ----------
 
@@ -1113,71 +1150,96 @@ class ClanHopper:
     def donner_troupes(self) -> str:
         """Vide le panneau de dons ouvert. Retourne l'issue, pour le journal.
 
-        On clique les cartes en couleur — les donnables — en relisant le
-        compteur « X/Y » après chaque clic : X qui rejoint Y termine la demande,
-        et un compteur devenu illisible signifie que le jeu a refermé le
-        panneau, seul vrai signal d'arrêt.
+        Le déroulé suit ce qui se passe à l'écran :
 
-        Une vue où **toutes les cartes sont grisées n'est pas une fin** : la
-        bande des troupes défile, et d'autres cartes donnables attendent
-        peut-être hors cadre. Tant que le panneau est là et que X n'a pas atteint
-        Y, on joue donc la macro de défilement et on recommence — jusqu'à
-        ``max_slides`` fois.
+        1. tant que le titre « Donner des troupes » est lisible, on clique les
+           cartes **en couleur** — les grisées sont indisponibles — en partant
+           de la **droite** : la bande range les troupes de la plus basique à la
+           plus avancée, et ce sont les dernières qui rapportent le plus de
+           points de don ;
+        2. le titre qui disparaît est le signal de fin : tout ce qui pouvait être
+           donné l'a été (le jeu referme le panneau de lui-même dès que X atteint
+           Y) ;
+        3. une vue où **toutes les cartes sont grisées n'est pas une fin** : la
+           bande des troupes défile, et d'autres cartes donnables attendent
+           peut-être hors cadre. On joue alors la macro de défilement et on
+           recommence — les cartes qui apparaissent peuvent être colorées ou
+           grises, et si tout est encore gris on défile de nouveau, jusqu'à
+           ``max_slides`` fois ;
+        4. panneau disparu ou défilements épuisés, on referme (voir
+           :meth:`fermer_panneau_dons`).
 
-        ``clics_avant_verif`` borne les clics **sans effet** : si le compteur
-        n'avance pas après ce nombre de clics, la vue est considérée comme
-        épuisée (une carte colorée qui ne réagit pas ne doit pas faire boucler le
-        bot) et on passe au défilement.
+        ``clics_avant_verif`` n'est qu'un garde-fou : si le compteur n'avance pas
+        après ce nombre de clics, la vue est traitée comme épuisée et on passe au
+        défilement — une tache colorée qui n'est pas une carte cliquable ne doit
+        pas faire boucler le bot indéfiniment.
         """
-        clics_max = max(1, int(self.params.get("clics_avant_verif", 5)))
         slides_max = max(0, int(self.params.get("max_slides", 3)))
+        clics_max = max(1, int(self.params.get("clics_avant_verif", 5)))
         macro = (self.params.get("macro_slide") or "").strip()
-        # Sans zone de compteur configurée, X/Y est hors de portée : on retombe
-        # sur un simple quota de clics par vue.
+        # Sans zone de compteur configurée, ni le titre ni le X/Y ne sont
+        # lisibles : on retombe sur un simple quota de clics par vue.
         suivi = self._zone("compteur") is not None
         total = slides = sans_effet = 0
-
-        donnees, demandees = self.lire_compteur() if suivi else (None, None)
-
-        def fini() -> bool:
-            return bool(demandees) and donnees is not None and donnees >= demandees
+        issue, avant = "epuise", None
 
         while True:
             if self._stop_requested():
                 return "interrompu"
 
+            ouvert, donnes, demandees = (self.etat_panneau() if suivi
+                                         else (True, None, None))
+            if suivi:
+                if not ouvert:
+                    self.log(f"    plus de « donner des troupes » à l'écran : "
+                             f"panneau refermé après {total} don(s).")
+                    issue = "termine"
+                    break
+                if donnes is not None and demandees and donnes >= demandees:
+                    self.log(f"    don complet ({donnes}/{demandees}).")
+                    issue = "complet"
+                    break
+                # Ce que le clic précédent a donné : seul un X qui MONTE prouve
+                # un don. X qui stagne — ou qui reste illisible — n'en prouve
+                # aucun, et laisser filer ce cas ferait boucler le bot sur une
+                # carte colorée qui ne réagit pas.
+                if total:
+                    monte = (donnes is not None and avant is not None
+                             and donnes > avant)
+                    sans_effet = 0 if monte else sans_effet + 1
+                if donnes is not None:
+                    avant = donnes
+
             cartes = self.cartes_donnables()
             if cartes and sans_effet < clics_max:
-                self._click_xy(cartes[0]["x"], cartes[0]["y"])
+                # De DROITE à gauche : la bande range les troupes de la plus
+                # basique à la plus avancée, et ce sont les dernières qui
+                # rapportent le plus de points de don.
+                carte = cartes[-1]
+                self._click_xy(carte["x"], carte["y"])
                 total += 1
                 if not suivi:
                     sans_effet += 1
-                    continue
-                avant = donnees
-                donnees, demandees = self.lire_compteur()
-                if donnees is None:
-                    self.log(f"    panneau refermé après {total} don(s).")
-                    return "termine"
-                if fini():
-                    self.log(f"    don complet ({donnees}/{demandees}).")
-                    return "complet"
-                sans_effet = 0 if (avant is None or donnees > avant) else sans_effet + 1
                 continue
 
-            # Plus rien à cliquer ICI — mais le don n'est pas terminé pour
-            # autant : c'est le moment de faire défiler la bande.
-            if slides >= slides_max:
-                break
-            if not macro:
-                self.log("    plus aucune carte donnable dans la vue, et aucune "
-                         "macro de défilement configurée pour aller voir plus loin.")
-                break
-            slides += 1
+            # Vue épuisée — mais le panneau est toujours là, donc il reste
+            # peut-être des troupes donnables hors cadre : on défile.
             cause = ("toutes les cartes visibles sont grisées" if not cartes
                      else f"{sans_effet} clic(s) sans effet sur le compteur")
-            reste = (f", il reste {demandees - donnees} troupe(s) à donner"
-                     if suivi and donnees is not None and demandees else "")
-            self.log(f"    {cause}{reste} : défilement des troupes "
+            reste = (f", il reste {demandees - donnes} troupe(s) à donner"
+                     if donnes is not None and demandees else "")
+            if slides >= slides_max:
+                if slides_max:
+                    self.log(f"    {cause}{reste} : {slides_max} défilement(s) "
+                             f"déjà effectué(s), on s'arrête là.")
+                break
+            if not macro:
+                self.log(f"    {cause}{reste}, et aucune macro de défilement "
+                         f"configurée pour aller voir plus loin.")
+                break
+
+            slides += 1
+            self.log(f"    {cause}{reste} : défilement de la bande de troupes "
                      f"({slides}/{slides_max})…")
             try:
                 playback.LecteurPosition(fichier_entree=macro).rejouer(
@@ -1186,21 +1248,13 @@ class ClanHopper:
                 self.log(f"    ⚠ Erreur macro de défilement « {macro} » : {e}")
                 break
             self._sleep(self._delay("delay_click"))
+            # La vue a changé : le quota de clics repart à zéro. Le dernier X,
+            # lui, se garde — le compteur est celui de la demande, pas de la vue.
             sans_effet = 0
-            if suivi:
-                donnees, demandees = self.lire_compteur()
-                if donnees is None:
-                    self.log(f"    panneau refermé après {total} don(s).")
-                    return "termine"
-                if fini():
-                    self.log(f"    don complet ({donnees}/{demandees}).")
-                    return "complet"
 
-        if self.params.get("echap_apres_don", True) and self.panneau_dons_ouvert():
-            pyautogui.press("esc")
-            self._sleep(self._delay("delay_click"))
+        self.fermer_panneau_dons()
         self.log(f"    {total} don(s) effectué(s).")
-        return "epuise"
+        return issue
 
     def _traiter_demandes_visibles(self, demandes: list) -> int:
         """Sert les demandes du scan ``demandes`` (champ actuel du chat).

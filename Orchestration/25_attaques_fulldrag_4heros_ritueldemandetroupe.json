@@ -1,0 +1,20 @@
+{
+    "type": "attack",
+    "name": "25_attaques_fulldrag_4heros_ritueldemandetroupe",
+    "accounts": [
+        {
+            "name": "petitlulu",
+            "switch_file": "switch/switch_ptitlulu_new.json",
+            "army_file": "armee/select_firstarmy_new.json",
+            "to_night_file": "",
+            "to_main_file": ""
+        }
+    ],
+    "attaques": 25,
+    "attaques_night": 0,
+    "strategy_file": "hdv18_fulldragon_4heros.json",
+    "night_strategy_file": "",
+    "upgrades_every": 0,
+    "research_every": 0,
+    "after_attack_file": "demande_troupe_apres_attaque.json"
+}

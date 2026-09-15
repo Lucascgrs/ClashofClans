@@ -26,6 +26,7 @@ import string
 import sys
 import pandas as pd
 import os
+import heapq
 import json
 import time
 import pyautogui
@@ -33,20 +34,32 @@ import pyperclip
 from contextlib import contextmanager
 from datetime import datetime
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed
+from concurrent.futures import wait as _attendre_futures
 import matplotlib.pyplot as plt
 import pytesseract
 import logging
 import threading
-from collections import deque
-from .token_manager import get_or_create_token
+from collections import Counter, deque
+
+# Comme pour les remparts et le saut de clan : le « failsafe » de PyAutoGUI
+# interrompt le script dès que le curseur atteint un coin de l'écran, or le clic
+# neutre de fermeture (coordonnée « escape ») est volontairement placé en haut à
+# gauche — souvent en (0, 0). L'arrêt d'urgence reste le bouton Stop de
+# l'interface (stop_event), consulté avant chaque invitation.
+pyautogui.FAILSAFE = False
+
+from . import cles_api
 from ..paths import (
     COORDS_CONFIG_FILE as COORDS_FILE,
     LOCATIONS_FILE,
     LEAGUES_FILE,
+    LEAGUE_TIERS_FILE,
     FILE_ALL_CLANS,
     FILE_ALL_PLAYERS,
     PLAYER_TAGS_FILE as FILE_PLAYER_TAGS,
+    INVITED_TAGS_FILE as FILE_INVITED_TAGS,
+    INVITE_STATE_FILE as FILE_INVITE_STATE,
 )
 
 # =============================================================================
@@ -79,7 +92,10 @@ logging.basicConfig(
     force=True,   # prime sur un basicConfig déjà posé ailleurs (env_setup)
 )
 
-API_TOKEN = get_or_create_token()
+# Toutes les requêtes passent par le pool de clés (cles_api) : jusqu'à 10 clés
+# en parallèle, débit régulé. API_TOKEN (première clé) reste exposé pour
+# compatibilité ; l'obtenir prépare toutes les clés dès l'import.
+API_TOKEN = cles_api.gestionnaire().clef_principale()
 
 # --- CONFIGURATION FILTRES (Modifiée par le GUI) ---
 # min_league_id : identifiant de la ligue MINIMALE exigée (grade). 0 = pas de
@@ -163,10 +179,12 @@ LOCATIONS_DICT = load_locations()
 # joueur = le rang (position) de sa ligue dans cette liste. Le filtre "grade
 # minimum" ne garde que les joueurs dont le rang de ligue ≥ celui choisi.
 #
-# La liste par défaut ci-dessous contient les ligues « classiques » (Unranked →
-# Legend). Le bouton « MAJ Ligues (API) » de l'interface appelle
-# fetch_all_leagues() pour récupérer la liste RÉELLE et à jour depuis l'API
-# (y compris le nouveau système de ligues classées numérotées), triée par id.
+# Depuis la refonte « classée » du village principal, la liste de référence est
+# celle des 37 paliers de ``/leaguetiers`` (Unranked → Legend I), enregistrée
+# dans league_tiers.json ; la liste par défaut ci-dessous (les 23 ligues
+# « classiques » Unranked → Legend de ``/leagues``) ne sert plus que de repli.
+# Le bouton « MAJ Ligues (API) » de l'interface appelle fetch_league_tiers()
+# puis fetch_all_leagues() pour rafraîchir les deux, triées par id.
 DEFAULT_LEAGUES = [
     {"id": 29000000, "name": "Unranked"},
     {"id": 29000001, "name": "Bronze League III"},
@@ -194,18 +212,26 @@ DEFAULT_LEAGUES = [
 ]
 
 
-def load_leagues() -> list:
-    """Charge la liste ordonnée des ligues depuis leagues.json (ou la liste par
-    défaut). L'ordre du fichier fait foi (trié par id croissant à l'écriture)."""
-    if os.path.exists(LEAGUES_FILE):
+def _load_ordered_leagues(path: str) -> list:
+    """Liste ordonnée [{id, name}] lue dans un fichier JSON (vide si absent)."""
+    if os.path.exists(path):
         try:
-            with open(LEAGUES_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if data:
                 return [{"id": it.get("id"), "name": it.get("name")} for it in data]
         except Exception as e:
-            logging.error(f"Erreur chargement leagues.json : {e}")
-    return [dict(lg) for lg in DEFAULT_LEAGUES]
+            logging.error(f"Erreur chargement {path} : {e}")
+    return []
+
+
+def load_leagues() -> list:
+    """Liste ordonnée des ligues du village principal, la plus actuelle d'abord :
+    les paliers classés (league_tiers.json), sinon l'ancienne liste
+    (leagues.json), sinon la liste par défaut ci-dessus."""
+    return (_load_ordered_leagues(LEAGUE_TIERS_FILE)
+            or _load_ordered_leagues(LEAGUES_FILE)
+            or [dict(lg) for lg in DEFAULT_LEAGUES])
 
 
 def _league_rank_maps(leagues: list):
@@ -219,17 +245,35 @@ def _league_rank_maps(leagues: list):
     return id_to_rank, name_to_rank
 
 
+# Liste de référence (paliers classés si disponibles) + ancienne liste gardée à
+# part : les données et les configurations d'orchestration antérieures à la
+# refonte parlent encore en ligues 29000xxx. Les rangs des deux listes n'ayant
+# pas la même échelle (37 paliers contre 23 ligues), _rescale() les ramène sur
+# celle de LEAGUES_LIST.
 LEAGUES_LIST = load_leagues()
 LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK = _league_rank_maps(LEAGUES_LIST)
+LEGACY_LEAGUES = (_load_ordered_leagues(LEAGUES_FILE)
+                  or [dict(lg) for lg in DEFAULT_LEAGUES])
+LEGACY_ID_TO_RANK, LEGACY_NAME_TO_RANK = _league_rank_maps(LEGACY_LEAGUES)
 
 
-def fetch_all_leagues(limit: int = 100) -> list:
-    """Récupère TOUTES les ligues via l'API (GET /leagues, paginé), les trie par
-    id croissant (= ordre de progression) et sauvegarde dans leagues.json.
-    Met aussi à jour les tables globales de rangs pour un usage immédiat."""
+def _refresh_league_tables() -> None:
+    """Recharge les tables de rangs depuis les fichiers (après un fetch)."""
+    global LEAGUES_LIST, LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK
+    global LEGACY_LEAGUES, LEGACY_ID_TO_RANK, LEGACY_NAME_TO_RANK
+    LEAGUES_LIST = load_leagues()
+    LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK = _league_rank_maps(LEAGUES_LIST)
+    LEGACY_LEAGUES = (_load_ordered_leagues(LEAGUES_FILE)
+                      or [dict(lg) for lg in DEFAULT_LEAGUES])
+    LEGACY_ID_TO_RANK, LEGACY_NAME_TO_RANK = _league_rank_maps(LEGACY_LEAGUES)
+
+
+def _fetch_leagues(endpoint: str, path: str, limit: int = 100) -> list:
+    """Récupère une liste de ligues paginée, la trie par id croissant (= ordre
+    de progression), l'enregistre dans ``path`` et rafraîchit les tables."""
     all_items = []
     params = {"limit": limit}
-    url = f"{API_URL}/leagues"
+    url = f"{API_URL}{endpoint}"
     while True:
         resp = safe_get(url, HEADERS, params=params)
         if not resp:
@@ -239,35 +283,75 @@ def fetch_all_leagues(limit: int = 100) -> list:
         if not items:
             break
         all_items.extend(items)
-        logging.info(f"Récupéré {len(items)} ligues...")
+        logging.info(f"Récupéré {len(items)} ligues ({endpoint})...")
         after = data.get("paging", {}).get("cursors", {}).get("after")
         if not after:
             break
         params["after"] = after
-        time.sleep(0.3)
 
     all_items.sort(key=lambda it: it.get("id", 0))
     slim = [{"id": it.get("id"), "name": it.get("name")} for it in all_items]
+    if not slim:
+        logging.error(f"Aucune ligue récupérée depuis {endpoint} — fichier inchangé.")
+        return []
     try:
-        with open(LEAGUES_FILE, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(slim, f, indent=4, ensure_ascii=False)
-        logging.info(f"Sauvegardé {len(slim)} ligues dans {LEAGUES_FILE}")
+        logging.info(f"Sauvegardé {len(slim)} ligues dans {path}")
     except Exception as e:
         logging.error(f"Erreur sauvegarde ligues : {e}")
 
-    global LEAGUES_LIST, LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK
-    LEAGUES_LIST = slim
-    LEAGUE_ID_TO_RANK, LEAGUE_NAME_TO_RANK = _league_rank_maps(slim)
+    _refresh_league_tables()
     return slim
+
+
+def fetch_league_tiers(limit: int = 100) -> list:
+    """``GET /leaguetiers`` — paliers classés actuels du village principal.
+
+    C'est la liste que le jeu utilise depuis la refonte « classée » (Unranked →
+    Legend I) et donc celle qui alimente le filtre « grade minimum »."""
+    return _fetch_leagues("/leaguetiers", LEAGUE_TIERS_FILE, limit)
+
+
+def fetch_all_leagues(limit: int = 100) -> list:
+    """``GET /leagues`` — ancienne liste (Bronze → Légende), conservée comme
+    repli pour les données antérieures à la refonte."""
+    return _fetch_leagues("/leagues", LEAGUES_FILE, limit)
+
+
+def _rescale(rank: int, source_total: int) -> int:
+    """Rang d'une autre liste ramené sur l'échelle de LEAGUES_LIST."""
+    if source_total <= 1 or len(LEAGUES_LIST) <= 1:
+        return rank
+    return round(rank * (len(LEAGUES_LIST) - 1) / (source_total - 1))
+
+
+def league_rank(league: dict) -> int:
+    """Rang (grade) d'une ligue sur l'échelle courante, 0 si inconnue."""
+    lg = league or {}
+    lid, name = lg.get("id"), lg.get("name")
+    if lid in LEAGUE_ID_TO_RANK:
+        return LEAGUE_ID_TO_RANK[lid]
+    if name in LEAGUE_NAME_TO_RANK:
+        return LEAGUE_NAME_TO_RANK[name]
+    legacy = LEGACY_ID_TO_RANK.get(lid)
+    if legacy is None:
+        legacy = LEGACY_NAME_TO_RANK.get(name)
+    if legacy is not None:
+        return _rescale(legacy, len(LEGACY_LEAGUES))
+    return 0
+
+
+def member_league(m: dict) -> dict:
+    """Ligue du village principal d'un membre : depuis la refonte « classée »
+    l'API renvoie ``leagueTier``, ``league`` ne subsistant que sur les données
+    antérieures."""
+    return m.get("leagueTier") or m.get("league") or {}
 
 
 def member_league_rank(m: dict) -> int:
     """Rang (grade) de la ligue d'un membre, 0 si non classé/inconnu."""
-    lg = m.get("league") or {}
-    lid = lg.get("id")
-    if lid in LEAGUE_ID_TO_RANK:
-        return LEAGUE_ID_TO_RANK[lid]
-    return LEAGUE_NAME_TO_RANK.get(lg.get("name"), 0)
+    return league_rank(member_league(m))
 
 
 HEADERS   = {"Authorization": f"Bearer {API_TOKEN}", "Accept": "application/json"}
@@ -344,7 +428,6 @@ def fetch_all_locations(limit: int = 100):
             break
             
         params["after"] = after
-        time.sleep(0.5) # Pause pour l'API
         
     # Sauvegarde
     try:
@@ -398,90 +481,37 @@ def clean_string(s: str) -> str:
 
 
 # =============================================================================
-# RATE LIMITER  (10 req/s — tier developer/silver)
+# REQUÊTES API  (pool multi-clés, voir cles_api)
 # =============================================================================
-
-class RateLimiter:
-    """
-    Limite le nombre de requêtes par seconde.
-    Thread-safe, compatible avec ThreadPoolExecutor.
-    """
-    def __init__(self, max_per_second: int = 10):
-        self.max_per_second = max_per_second
-        self._lock          = threading.Lock()
-        self._timestamps    = deque()
-
-    def acquire(self):
-        """Bloque jusqu'à ce qu'un slot soit disponible."""
-        while True:
-            with self._lock:
-                now = time.monotonic()
-                while self._timestamps and self._timestamps[0] < now - 1.0:
-                    self._timestamps.popleft()
-                if len(self._timestamps) < self.max_per_second:
-                    self._timestamps.append(now)
-                    return
-            time.sleep(0.01)
-
-
-_rate_limiter = RateLimiter(max_per_second=10)
+# L'ancien limiteur global à 10 req/s est remplacé par le pool de clés : chaque
+# clé a son propre quota (~80 req/s mesurés), les requêtes sont réparties sur
+# jusqu'à 10 clés et le débit se régule selon les 429, les erreurs, la latence
+# et la charge du processeur. Réglages : fenêtre « 🔑 Clés API ».
 
 from typing import Optional
 
-# --- Session HTTP partagée ---------------------------------------------------
-# ``requests.get`` ouvre une connexion TCP + une poignée de main TLS à CHAQUE
-# appel : sur des dizaines de milliers de requêtes avec 10 threads, c'est la
-# première cause des « Read timed out ». On réutilise donc un pool de
-# connexions dimensionné pour les workers.
-HTTP_TIMEOUT = (5, 20)   # (connexion, lecture) — l'API CoC est lente sous charge
-HTTP_POOL_SIZE = 64
+HTTP_TIMEOUT = cles_api.HTTP_TIMEOUT   # (connexion, lecture)
 
 
-def _build_session(pool_size: int = HTTP_POOL_SIZE) -> requests.Session:
-    """Crée la session partagée (pool de connexions réutilisables)."""
-    session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(
-        pool_connections=pool_size, pool_maxsize=pool_size, max_retries=0)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+def workers_scan() -> int:
+    """Threads utiles pour un scan : de quoi occuper toutes les clés actives."""
+    return cles_api.gestionnaire().workers_recommandes()
 
 
-_session = _build_session()
+def safe_get(url: str, headers: dict = None, params: dict = None,
+             retries: int = cles_api.TENTATIVES, delay: int = None) -> Optional[requests.Response]:
+    """GET sur l'API via le pool de clés : répartition, 429, nouveaux essais.
 
-
-def safe_get(url: str, headers: dict, params: dict = None, retries: int = 3, delay: int = 2) -> Optional[requests.Response]:
-    """GET HTTP avec rate limiting, gestion 429, retry + backoff jitté.
+    ``headers`` et ``delay`` ne servent plus (le pool choisit la clé et les
+    attentes) ; ils restent acceptés pour les appelants existants.
 
     ⚠ Un retour ``None`` signifie ÉCHEC (et non « aucun résultat ») : les
     appelants doivent le propager pour que le préfixe / le clan concerné soit
-    reprogrammé, sinon on creuse des trous silencieux dans les données.
+    reprogrammé, sinon on creuse des trous silencieux dans les données. Une
+    réponse définitive de l'API (403 données privées, 404 introuvable…) lève
+    ``requests.HTTPError``.
     """
-    for attempt in range(retries):
-        try:
-            _rate_limiter.acquire()
-            r = _session.get(url, headers=headers, params=params,
-                             timeout=HTTP_TIMEOUT)
-            if r.status_code == 429:
-                retry_after = int(r.headers.get("Retry-After", delay * (attempt + 1)))
-                logging.warning(f"Rate limit 429 — attente {retry_after}s")
-                time.sleep(retry_after)
-                continue
-            r.raise_for_status()
-            return r
-        except requests.exceptions.HTTPError:
-            raise
-        except Exception as e:
-            if attempt == retries - 1:
-                logging.error(f"Abandon après {retries} tentatives : {e}")
-                return None
-            # Backoff exponentiel + jitter : sans le jitter, les threads
-            # repartent tous en même temps et re-saturent l'API.
-            wait = delay * (2 ** attempt) * (0.5 + random.random())
-            logging.warning(f"Tentative {attempt + 1}/{retries} échouée: {e} "
-                            f"— nouvelle tentative dans {wait:.1f}s")
-            time.sleep(wait)
-    return None
+    return cles_api.gestionnaire().get(url, params, tentatives=retries)
 
 
 # =============================================================================
@@ -724,8 +754,9 @@ def _exclusive(name: str):
 # SCAN INCRÉMENTAL DE CLANS  (GET /clans?name=XXX)
 # =============================================================================
 # Stratégie :
-#   - On itère sur les 17 576 préfixes AAA→ZZZ par batch de batch_size
-#   - max_workers threads tournent en parallèle, bridés par le rate limiter global
+#   - On itère sur les 17 576 préfixes AAA→ZZZ en flux continu (lots de
+#     batch_size préfixes pour le journal et les sauvegardes)
+#   - max_workers threads tournent en parallèle, cadencés par le pool de clés API
 #   - La progression (dernier préfixe traité) est sauvegardée dans _meta du xlsx
 #   - Les données sont stockées dans All_Clans.parquet
 
@@ -802,6 +833,101 @@ def _fetch_clans_for_prefix(prefix: str, page_size: int,
 #: Nombre maximum de préfixes en attente de reprise conservés dans _meta.
 MAX_RETRY_PREFIXES = 2000
 
+#: Passages d'un préfixe / d'un clan en échec pendant UN scan avant qu'il ne
+#: reste dans la liste « à repasser » du scan suivant.
+MAX_ESSAIS_SCAN = 3
+
+
+def _reprogrammer(queue: list, position: int, echecs, essais: Counter, ecart: int) -> None:
+    """Remet chaque élément en échec dans la file, ``ecart`` éléments plus loin
+    (le temps qu'un souci passager se dissipe), tant qu'il n'a pas épuisé ses
+    MAX_ESSAIS_SCAN passages. Marqué « reprise » : il ne fait pas avancer le
+    curseur."""
+    for element in echecs:
+        essais[element] += 1
+        if essais[element] < MAX_ESSAIS_SCAN:
+            queue.insert(min(len(queue), position + ecart), (element, True))
+
+
+def _prochain_normal(queue: list, position: int):
+    """Premier élément « normal » (pas une reprise) de la file à partir de ``position``."""
+    for i in range(position, len(queue)):
+        element, is_retry = queue[i]
+        if not is_retry:
+            return element
+    return None
+
+
+def _parcourir_file(queue: list, max_workers: int, taille_lot: int, tache, traiter,
+                    fin_de_lot, arreter) -> None:
+    """Traite la file en FLUX CONTINU : dès qu'une tâche se termine, la suivante part.
+
+    L'ancien fonctionnement par lots attendait la réponse la plus lente de chaque
+    lot : quelques réponses de 10 s et plus (mesurées sur l'API réelle) figeaient
+    tout le scan pendant que les clés restaient inoccupées.
+
+    - ``tache(element)`` tourne dans un thread de travail ;
+    - ``traiter(element, is_retry, resultat, erreur, position)`` tourne dans le
+      thread appelant ; ``position`` est la prochaine position à soumettre, pour
+      reprogrammer un échec plus loin ;
+    - ``fin_de_lot(numero, marque)`` est appelée tous les ``taille_lot`` éléments
+      terminés et une dernière fois à la fin : ``marque`` est la position du
+      premier élément normal pas encore terminé, pour que le curseur de reprise
+      ne saute jamais un élément quand les réponses arrivent dans le désordre ;
+    - ``arreter()`` : ``None`` pour continuer ; ``"objectif"`` quand le scan a
+      assez de résultats — plus aucun nouvel élément, mais les reprises déjà
+      dans la file sont traitées (les erreurs sont retentées avant la fin) ;
+      ``"stop"`` (bouton Stop, arrêt d'urgence) — seules les tâches en cours
+      finissent, les reprises restent dans la liste « à repasser ».
+    """
+    en_cours  = {}             # futur → (position, élément, reprise ?)
+    positions = []             # tas des positions normales soumises…
+    terminees = set()          # … dont celles déjà terminées
+    position  = 0
+    faits     = 0
+    numero    = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        while True:
+            etat = arreter()
+            if not etat:
+                while position < len(queue) and len(en_cours) < max_workers:
+                    element, is_retry = queue[position]
+                    en_cours[executor.submit(tache, element)] = (position, element, is_retry)
+                    if not is_retry:
+                        heapq.heappush(positions, position)
+                    position += 1
+            elif etat == "objectif":
+                # Reprises encore en file : retirées de la file (au-delà de
+                # ``position``, donc sans effet sur le curseur) et soumises.
+                i = position
+                while len(en_cours) < max_workers:
+                    i = next((k for k in range(i, len(queue)) if queue[k][1]), None)
+                    if i is None:
+                        break
+                    element, _ = queue.pop(i)
+                    en_cours[executor.submit(tache, element)] = (None, element, True)
+            if not en_cours:
+                fin_de_lot(numero + 1, position)
+                return
+            termines, _ = _attendre_futures(en_cours, timeout=1.0,
+                                            return_when=FIRST_COMPLETED)
+            for futur in termines:
+                pos, element, is_retry = en_cours.pop(futur)
+                try:
+                    resultat, erreur = futur.result(), None
+                except Exception as e:
+                    resultat, erreur = None, e
+                traiter(element, is_retry, resultat, erreur, position)
+                if not is_retry:
+                    terminees.add(pos)
+                faits += 1
+            while positions and positions[0] in terminees:
+                terminees.discard(heapq.heappop(positions))
+            if faits >= taille_lot:
+                faits = 0
+                numero += 1
+                fin_de_lot(numero, positions[0] if positions else position)
+
 
 def _clan_cursor_key(location_id) -> str:
     """Clé _meta du curseur de reprise — UN CURSEUR PAR PAYS.
@@ -822,8 +948,8 @@ def scan_clans_incremental(max_new_clans: int = 1000,
                            page_size: int = 100,
                            file_path: str = FILE_ALL_CLANS,
                            location_id: int = None,
-                           max_workers: int = 10,
-                           batch_size: int = 50,
+                           max_workers: int = None,
+                           batch_size: int = None,
                            progress_callback=None,
                            stop_event=None,
                            save_every: int = 10) -> pd.DataFrame:
@@ -835,8 +961,9 @@ def scan_clans_incremental(max_new_clans: int = 1000,
       - page_size     : clans par requête API (max 100)
       - file_path     : référence xlsx (données dans le .parquet associé)
       - location_id   : filtrer par pays (None = monde entier)
-      - max_workers   : threads simultanés (≤ max_per_second du rate limiter)
-      - batch_size    : préfixes soumis à la fois
+      - max_workers   : threads simultanés (None = selon les clés API actives)
+      - batch_size    : préfixes par lot — journal, curseur, sauvegarde tous les
+                        save_every lots (None = 2 × max_workers, 50 min.)
       - stop_event    : ``threading.Event`` — arrêt propre entre deux batchs
       - save_every    : sauvegarde incrémentale tous les N batchs
 
@@ -848,8 +975,10 @@ def scan_clans_incremental(max_new_clans: int = 1000,
     """
     with _exclusive("scan_clans"), Timer("scan_clans_incremental total"):
 
-        cursor_key = _clan_cursor_key(location_id)
-        retry_key  = _clan_retry_key(location_id)
+        cursor_key  = _clan_cursor_key(location_id)
+        retry_key   = _clan_retry_key(location_id)
+        max_workers = max_workers or workers_scan()
+        batch_size  = batch_size or max(50, 2 * max_workers)
 
         # ── Chargement ────────────────────────────────────────────────────────
         with Timer("chargement données existantes (parquet + meta)"):
@@ -916,85 +1045,73 @@ def scan_clans_incremental(max_new_clans: int = 1000,
         with tqdm(total=max_new_clans, desc="Scan clans",
                   unit="clan", dynamic_ncols=True) as pbar:
 
-            for batch_start in range(0, len(queue), batch_size):
-                if fetched >= max_new_clans:
-                    break
-                if stop_event is not None and stop_event.is_set():
-                    interrupted = True
-                    break
+            essais = Counter()
+            lot    = {"clans": 0, "echecs": 0, "debut": time.perf_counter()}
 
-                batch         = queue[batch_start: batch_start + batch_size]
-                prefixes      = [p for p, _ in batch]
-                t_batch       = time.perf_counter()
-                batch_fetched = 0      # compteur local au batch
-                batch_failed  = []
+            def traiter(prefix, is_retry, resultat, erreur, position):
+                """Intègre le résultat d'un préfixe (thread du scan)."""
+                nonlocal fetched, total_reqs, failed_total
+                if erreur is not None:
+                    logging.error(f"Erreur préfixe {prefix}: {erreur}")
+                    clans, ok = [], False
+                else:
+                    _, clans, nb_reqs, ok = resultat
+                    total_reqs += nb_reqs
 
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(
-                            _fetch_clans_for_prefix, prefix, page_size, location_id
-                        ): prefix
-                        for prefix in prefixes
-                    }
+                # Un préfixe complet sort de la file de reprise ; un préfixe
+                # incomplet y entre et repasse plus loin dans ce même scan.
+                if ok:
+                    pending_set.discard(prefix)
+                else:
+                    pending_set.add(prefix)
+                    failed_total += 1
+                    lot["echecs"] += 1
+                    _reprogrammer(queue, position, [prefix], essais, 2 * batch_size)
 
-                    for future in as_completed(futures):
-                        try:
-                            prefix, clans, nb_reqs, ok = future.result()
-                            total_reqs += nb_reqs
-                        except Exception as e:
-                            prefix = futures[future]
-                            logging.error(f"Erreur préfixe {prefix}: {e}")
-                            batch_failed.append(prefix)
-                            continue
+                for clan in clans:
+                    tag = clan.get("tag")
+                    if tag and tag not in known_tags:
+                        known_tags.add(tag)
+                        new_rows.append(_extract_clan_row(clan, timestamp))
+                        fetched      += 1
+                        lot["clans"] += 1
+                        pbar.update(1)
+                        if progress_callback:
+                            progress_callback(min(fetched, max_new_clans), max_new_clans)
 
-                        if not ok:
-                            batch_failed.append(prefix)
-
-                        with lock:
-                            for clan in clans:
-                                tag = clan.get("tag")
-                                if tag and tag not in known_tags:
-                                    known_tags.add(tag)
-                                    new_rows.append(_extract_clan_row(clan, timestamp))
-                                    fetched       += 1
-                                    batch_fetched += 1
-                                    pbar.update(1)
-                                    if progress_callback:
-                                        progress_callback(min(fetched, max_new_clans), max_new_clans)
-
-                # Les préfixes complets sortent de la file de reprise, les
-                # incomplets y entrent. Le curseur, lui, avance jusqu'au dernier
-                # préfixe « normal » du batch (les reprises n'y touchent pas).
-                failed = set(batch_failed)
-                pending_set.difference_update(p for p in prefixes if p not in failed)
-                pending_set.update(failed)
-                failed_total += len(failed)
-
-                normals = [p for p, is_retry in batch if not is_retry]
-                if normals:
-                    idx = all_prefixes.index(normals[-1])
-                    next_cursor = all_prefixes[(idx + 1) % len(all_prefixes)]
-
-                batch_no      = batch_start // batch_size + 1
-                batch_elapsed = time.perf_counter() - t_batch
+            def fin_de_lot(batch_no, marque):
+                """Curseur = premier préfixe normal pas encore terminé (jamais de saut)."""
+                nonlocal next_cursor
+                suivant     = _prochain_normal(queue, marque)
+                next_cursor = suivant if suivant is not None else rotated[0]
+                duree       = time.perf_counter() - lot["debut"]
                 logging.info(
-                    f"[scan_clans] Batch {batch_no} "
-                    f"(préfixes {prefixes[0]!r}→{prefixes[-1]!r}) | "
-                    f"+{batch_fetched} clans ce batch | total={fetched} | "
-                    f"{batch_elapsed:.2f}s | {total_reqs} req | "
-                    f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.2f} clans/s"
-                    + (f" | ⚠ {len(failed)} préfixe(s) à repasser" if failed else "")
+                    f"[scan_clans] Lot {batch_no} | +{lot['clans']} clans | total={fetched} | "
+                    f"{duree:.2f}s | {total_reqs} req | "
+                    f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.2f} clans/s | "
+                    f"curseur {next_cursor!r}"
+                    + (f" | ⚠ {lot['echecs']} préfixe(s) à repasser" if lot["echecs"] else "")
                 )
-
+                lot.update(clans=0, echecs=0, debut=time.perf_counter())
                 if batch_no % save_every == 0:
                     flush()
 
-                if fetched >= max_new_clans:
-                    logging.info(
-                        f"[scan_clans] Objectif atteint ({fetched} ≥ {max_new_clans}) "
-                        f"— arrêt après le batch en cours."
-                    )
-                    break
+            def arreter():
+                nonlocal interrupted
+                if stop_event is not None and stop_event.is_set():
+                    interrupted = True
+                    return "stop"
+                return "objectif" if fetched >= max_new_clans else None
+
+            _parcourir_file(queue, max_workers, batch_size,
+                            lambda prefix: _fetch_clans_for_prefix(prefix, page_size, location_id),
+                            traiter, fin_de_lot, arreter)
+
+            if fetched >= max_new_clans:
+                logging.info(
+                    f"[scan_clans] Objectif atteint ({fetched} ≥ {max_new_clans}) "
+                    f"— arrêt après les requêtes et reprises en cours."
+                )
 
         flush(final=True)
 
@@ -1038,7 +1155,7 @@ def _extract_member_row(member: dict, clan_tag: str, timestamp: str) -> dict:
         "trophies"         : member.get("trophies"),
         "donations"        : member.get("donations"),
         "donationsReceived": member.get("donationsReceived"),
-        "league"           : member.get("league", {}).get("name"),
+        "league"           : member_league(member).get("name"),
     }
 
 
@@ -1055,15 +1172,15 @@ def filter_player(m: dict) -> bool:
         return False
         
     # Vérification Ligue (non-classés)
-    league_name = (m.get("league") or {}).get("name", "Unranked")
+    league_name = member_league(m).get("name", "Unranked")
     if cfg.get("exclude_unranked", False) and league_name == "Unranked":
         return False
 
     # Vérification GRADE (ligue minimale) — remplace l'ancien filtre trophées.
     min_league_id = cfg.get("min_league_id", 0)
     if min_league_id:
-        min_rank = LEAGUE_ID_TO_RANK.get(min_league_id)
-        if min_rank is not None and member_league_rank(m) < min_rank:
+        min_rank = league_rank({"id": min_league_id})
+        if min_rank and member_league_rank(m) < min_rank:
             return False
 
     # Vérification Dons (Activité)
@@ -1092,7 +1209,12 @@ def _get_clan_members_paged(clan_tag: str, page_size: int = 100,
     if after_cursor:
         params["after"] = after_cursor
 
-    r = safe_get(f"{API_URL}/clans/{tag_enc}/members", HEADERS, params)
+    try:
+        r = safe_get(f"{API_URL}/clans/{tag_enc}/members", HEADERS, params)
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", None) == 404:
+            return [], None, True      # clan disparu : rien à récupérer, pas un échec
+        raise
     if not r:
         return [], None, False
 
@@ -1147,8 +1269,8 @@ def scan_players_incremental(max_new_players: int = 2000,
                              condition: bool = True,
                              clans_file: str = FILE_ALL_CLANS,
                              players_file: str = FILE_ALL_PLAYERS,
-                             max_workers: int = 10,
-                             batch_size: int = 50,
+                             max_workers: int = None,
+                             batch_size: int = None,
                              progress_callback=None,
                              stop_event=None,
                              save_every: int = 10) -> pd.DataFrame:
@@ -1159,6 +1281,9 @@ def scan_players_incremental(max_new_players: int = 2000,
     qui reboucle, clans en échec remis en file, sauvegardes incrémentales.
     """
     with _exclusive("scan_players"), Timer("scan_players_incremental total"):
+
+        max_workers = max_workers or workers_scan()
+        batch_size  = batch_size or max(50, 2 * max_workers)
 
         with Timer("chargement clans source (parquet)"):
             clans_df = _read_data(clans_file)
@@ -1241,85 +1366,79 @@ def scan_players_incremental(max_new_players: int = 2000,
         with tqdm(total=max_new_players, desc="Scan joueurs",
                   unit="joueur", dynamic_ncols=True) as pbar:
 
-            for batch_start in range(0, len(queue), batch_size):
-                if fetched >= max_new_players:
-                    break
-                if stop_event is not None and stop_event.is_set():
-                    interrupted = True
-                    break
+            essais = Counter()
+            lot    = {"joueurs": 0, "clans": 0, "echecs": 0, "debut": time.perf_counter()}
 
-                batch         = queue[batch_start: batch_start + batch_size]
-                tags          = [t for t, _ in batch]
-                t_batch       = time.perf_counter()
-                batch_fetched = 0      # compteur local au batch
-                batch_failed  = []
+            def traiter(clan_tag, is_retry, resultat, erreur, position):
+                """Intègre les membres d'un clan (thread du scan)."""
+                nonlocal fetched, total_reqs, failed_total
+                if erreur is not None:
+                    logging.error(f"Erreur clan {clan_tag}: {erreur}")
+                    members, ok = [], False
+                else:
+                    _, members, nb_reqs, ok = resultat
+                    total_reqs += nb_reqs
 
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(
-                            _fetch_members_for_clan, tag, page_size, condition
-                        ): tag
-                        for tag in tags
-                    }
+                lot["clans"] += 1
+                if ok:
+                    pending_set.discard(clan_tag)
+                else:
+                    pending_set.add(clan_tag)
+                    failed_total += 1
+                    lot["echecs"] += 1
+                    _reprogrammer(queue, position, [clan_tag], essais, 2 * batch_size)
 
-                    for future in as_completed(futures):
-                        clan_tag = futures[future]
-                        try:
-                            _, members, nb_reqs, ok = future.result()
-                            total_reqs += nb_reqs
-                        except Exception as e:
-                            logging.error(f"Erreur clan {clan_tag}: {e}")
-                            batch_failed.append(clan_tag)
-                            continue
+                for row in members:
+                    tag = row.get("player_tag")
+                    if tag and tag not in known_tags:
+                        known_tags.add(tag)
+                        new_rows.append(row)
+                        fetched        += 1
+                        lot["joueurs"] += 1
+                        pbar.update(1)
+                        if progress_callback:
+                            progress_callback(min(fetched, max_new_players), max_new_players)
 
-                        if not ok:
-                            batch_failed.append(clan_tag)
-
-                        with lock:
-                            for row in members:
-                                tag = row.get("player_tag")
-                                if tag and tag not in known_tags:
-                                    known_tags.add(tag)
-                                    new_rows.append(row)
-                                    fetched       += 1
-                                    batch_fetched += 1
-                                    pbar.update(1)
-                                    if progress_callback:
-                                        progress_callback(min(fetched, max_new_players), max_new_players)
-
-                failed = set(batch_failed)
-                pending_set.difference_update(t for t in tags if t not in failed)
-                pending_set.update(failed)
-                failed_total += len(failed)
-
-                normals = [t for t, is_retry in batch if not is_retry]
-                if normals:
+            def fin_de_lot(batch_no, marque):
+                """Curseur = premier clan normal pas encore terminé (jamais de saut)."""
+                nonlocal next_idx, next_tag
+                suivant = _prochain_normal(queue, marque)
+                if suivant is None and rotated:
+                    suivant = rotated[0]
+                if suivant is not None:
                     try:
-                        idx      = clan_tags.index(normals[-1])
-                        next_idx = (idx + 1) % len(clan_tags)
-                        next_tag = clan_tags[next_idx]
+                        next_idx = clan_tags.index(suivant)
+                        next_tag = suivant
                     except ValueError:
                         pass
-
-                batch_no      = batch_start // batch_size + 1
-                batch_elapsed = time.perf_counter() - t_batch
+                duree = time.perf_counter() - lot["debut"]
                 logging.info(
-                    f"[scan_players] Batch {batch_no} ({len(batch)} clans) | "
-                    f"+{batch_fetched} joueurs ce batch | total={fetched} | "
-                    f"{batch_elapsed:.2f}s | {total_reqs} req | "
+                    f"[scan_players] Lot {batch_no} ({lot['clans']} clans) | "
+                    f"+{lot['joueurs']} joueurs | total={fetched} | {duree:.2f}s | "
+                    f"{total_reqs} req | "
                     f"{fetched / max(time.perf_counter() - t_scan_start, 0.01):.2f} joueurs/s"
-                    + (f" | ⚠ {len(failed)} clan(s) à repasser" if failed else "")
+                    + (f" | ⚠ {lot['echecs']} clan(s) à repasser" if lot["echecs"] else "")
                 )
-
+                lot.update(joueurs=0, clans=0, echecs=0, debut=time.perf_counter())
                 if batch_no % save_every == 0:
                     flush()
 
-                if fetched >= max_new_players:
-                    logging.info(
-                        f"[scan_players] Objectif atteint ({fetched} ≥ {max_new_players}) "
-                        f"— arrêt après le batch en cours."
-                    )
-                    break
+            def arreter():
+                nonlocal interrupted
+                if stop_event is not None and stop_event.is_set():
+                    interrupted = True
+                    return "stop"
+                return "objectif" if fetched >= max_new_players else None
+
+            _parcourir_file(queue, max_workers, batch_size,
+                            lambda tag: _fetch_members_for_clan(tag, page_size, condition),
+                            traiter, fin_de_lot, arreter)
+
+            if fetched >= max_new_players:
+                logging.info(
+                    f"[scan_players] Objectif atteint ({fetched} ≥ {max_new_players}) "
+                    f"— arrêt après les requêtes et reprises en cours."
+                )
 
         flush(final=True)
 
@@ -1351,10 +1470,14 @@ def scan_players_incremental(max_new_players: int = 2000,
 
 def update_players_range(from_pos: int = 0, to_pos: int = 100,
                          players_file: str = FILE_ALL_PLAYERS,
-                         token: str = API_TOKEN):
+                         token: str = None, max_workers: int = None):
     """
     Rafraîchit les données des joueurs entre les positions from_pos et to_pos
-    (index 0-based) via GET /players/{tag}.
+    (index 0-based) via GET /players/{tag}, en parallèle sur les clés API.
+
+    Un joueur dont la requête échoue est retenté (MAX_ESSAIS_SCAN passages) ;
+    un joueur introuvable (compte supprimé) est laissé tel quel. ``token`` ne
+    sert plus (le pool choisit la clé) mais reste accepté.
     """
     with Timer(f"update_players_range [{from_pos}:{to_pos}]"):
         with Timer("chargement joueurs (parquet)"):
@@ -1370,19 +1493,50 @@ def update_players_range(from_pos: int = 0, to_pos: int = 100,
             f"→ {len(slice_tags)} joueurs"
         )
 
-        updated = 0
-        t_start = time.perf_counter()
+        def fetch(tag: str) -> tuple:
+            """(tag, données ou None, ok) — ok=False : échec API à retenter."""
+            try:
+                r = safe_get(f"{API_URL}/players/{tag.replace('#', '%23')}")
+            except requests.exceptions.HTTPError as e:
+                if getattr(e.response, "status_code", None) == 404:
+                    return tag, None, True
+                raise
+            return tag, (r.json() if r is not None else None), r is not None
 
-        for tag in tqdm(slice_tags, desc="Mise à jour joueurs", unit="joueur"):
-            tag_enc = tag.replace("#", "%23")
-            r = safe_get(
-                f"{API_URL}/players/{tag_enc}",
-                {"Authorization": f"Bearer {token}"}
+        resultats = {}
+        a_faire   = list(dict.fromkeys(slice_tags))
+        workers   = max_workers or workers_scan()
+        t_start   = time.perf_counter()
+
+        for passage in range(1, MAX_ESSAIS_SCAN + 1):
+            if not a_faire:
+                break
+            echecs = []
+            with ThreadPoolExecutor(max_workers=min(workers, len(a_faire))) as executor:
+                futures = {executor.submit(fetch, tag): tag for tag in a_faire}
+                for future in tqdm(as_completed(futures), total=len(futures),
+                                   desc=f"Mise à jour joueurs (passage {passage})",
+                                   unit="joueur"):
+                    try:
+                        tag, data, ok = future.result()
+                    except Exception as e:
+                        logging.error(f"[update_players_range] {futures[future]} : {e}")
+                        echecs.append(futures[future])
+                        continue
+                    if not ok:
+                        echecs.append(tag)
+                    elif data:
+                        resultats[tag] = data
+            a_faire = echecs
+
+        if a_faire:
+            logging.warning(
+                f"[update_players_range] {len(a_faire)} joueur(s) non rafraîchi(s) après "
+                f"{MAX_ESSAIS_SCAN} passages : {', '.join(a_faire[:10])}"
             )
-            if not r:
-                continue
 
-            data = r.json()
+        horodatage = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for tag, data in resultats.items():
             mask = df["player_tag"] == tag
 
             for col in ["name", "expLevel", "townHallLevel", "trophies",
@@ -1393,13 +1547,12 @@ def update_players_range(from_pos: int = 0, to_pos: int = 100,
             if "league" in df.columns and "league" in data:
                 df.loc[mask, "league"] = data["league"].get("name")
 
-            df.loc[mask, "timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            updated += 1
+            df.loc[mask, "timestamp"] = horodatage
 
         elapsed = time.perf_counter() - t_start
         logging.info(
-            f"[update_players_range] {updated}/{len(slice_tags)} joueurs mis à jour | "
-            f"{elapsed:.2f}s | {updated / max(elapsed, 0.01):.0f} joueurs/s"
+            f"[update_players_range] {len(resultats)}/{len(slice_tags)} joueurs mis à jour | "
+            f"{elapsed:.2f}s | {len(resultats) / max(elapsed, 0.01):.0f} joueurs/s"
         )
 
         _write_data(players_file, df)
@@ -1447,16 +1600,21 @@ def extract_player_info(m: dict) -> dict:
     }
 
 
-def get_clan_members(clan_tag: str, token: str, condition: bool = True) -> dict:
-    """Retourne un dict {tag: infos} pour les membres d'un clan."""
+def get_clan_members(clan_tag: str, token: str = None, condition: bool = True) -> dict:
+    """Retourne un dict {tag: infos} pour les membres d'un clan.
+
+    Passe par le pool de clés (``token`` ne sert plus, conservé pour
+    compatibilité). Lève une exception si l'API échoue — l'appelant retente —
+    et retourne {} pour un clan disparu."""
     tag_encoded = clan_tag.replace("#", "%23")
-    r = requests.get(
-        f"{API_URL}/clans/{tag_encoded}/members",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=6
-    )
-    if r.status_code != 200:
-        raise Exception(f"Erreur API clan {clan_tag}: {r.status_code}")
+    try:
+        r = safe_get(f"{API_URL}/clans/{tag_encoded}/members")
+    except requests.exceptions.HTTPError as e:
+        if getattr(e.response, "status_code", None) == 404:
+            return {}
+        raise
+    if r is None:
+        raise Exception(f"Erreur API clan {clan_tag} : échec après plusieurs essais")
 
     members = r.json().get("items", [])
     return {
@@ -1466,32 +1624,44 @@ def get_clan_members(clan_tag: str, token: str, condition: bool = True) -> dict:
     }
 
 
-def get_all_clan_members_threadpool(clan_tags: list[str], token: str,
-                                    max_workers: int = DEFAULT_MAX_WORKERS,
+def get_all_clan_members_threadpool(clan_tags: list[str], token: str = None,
+                                    max_workers: int = None,
                                     condition: bool = True) -> list[dict]:
-    """Parcourt une liste de tags de clans en parallèle (ThreadPoolExecutor)."""
+    """Parcourt une liste de tags de clans en parallèle (ThreadPoolExecutor).
+
+    Les clans en échec sont retentés (MAX_ESSAIS_SCAN passages) pour ne pas
+    laisser de trou dans la collecte ; ``token`` ne sert plus."""
     results = []
-    errors  = 0
-    logging.info(f"Collecte joueurs sur {len(clan_tags)} clans...")
+    a_faire = list(clan_tags)
+    workers = max_workers or workers_scan()
+    logging.info(f"Collecte joueurs sur {len(clan_tags)} clans ({workers} threads)...")
     t_start = time.perf_counter()
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(get_clan_members, tag, token, condition): tag
-            for tag in clan_tags
-        }
-        for future in tqdm(as_completed(futures), total=len(futures),
-                           desc="Clans scannés", unit="clan"):
-            tag = futures[future]
-            try:
-                results.append(future.result())
-            except Exception as e:
-                errors += 1
-                logging.error(f"Erreur clan {tag}: {e}")
+    for passage in range(1, MAX_ESSAIS_SCAN + 1):
+        if not a_faire:
+            break
+        echecs = []
+        with ThreadPoolExecutor(max_workers=min(workers, len(a_faire))) as executor:
+            futures = {
+                executor.submit(get_clan_members, tag, None, condition): tag
+                for tag in a_faire
+            }
+            for future in tqdm(as_completed(futures), total=len(futures),
+                               desc=f"Clans scannés (passage {passage})", unit="clan"):
+                tag = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    echecs.append(tag)
+                    logging.debug(f"Erreur clan {tag}: {e}")
+        a_faire = echecs
 
     elapsed = time.perf_counter() - t_start
+    if a_faire:
+        logging.warning(f"Collecte : {len(a_faire)} clan(s) toujours en échec après "
+                        f"{MAX_ESSAIS_SCAN} passages.")
     logging.info(
-        f"Collecte terminée | Erreurs: {errors} | "
+        f"Collecte terminée | Échecs définitifs: {len(a_faire)} | "
         f"{elapsed:.2f}s | {len(clan_tags) / max(elapsed, 0.01):.0f} clans/s"
     )
     return results
@@ -1575,17 +1745,23 @@ def automate_coc_input(text: str):
 
     coords = load_coords()
 
-    pyautogui.click(*coords["profil"])      ; wait()
-    pyautogui.click(*coords["social"])      ; wait()
-    pyautogui.click(*coords["recherchedejoueurs"]); wait()
-    pyautogui.click(*coords["fill"])      ; wait()
+    def clic(nom):
+        """Clique une coordonnée nommée, avec repli sur la valeur par défaut :
+        une configuration incomplète levait un KeyError qui arrêtait tout le lot."""
+        point = coords.get(nom) or DEFAULT_COORDS[nom]
+        pyautogui.click(*point)
+
+    clic("profil")             ; wait()
+    clic("social")             ; wait()
+    clic("recherchedejoueurs") ; wait()
+    clic("fill")               ; wait()
 
     pyperclip.copy(text)
     pyautogui.hotkey("ctrl", "v")         ; wait()
     pyautogui.press("enter")              ; wait()
 
-    pyautogui.click(*coords["invite"])    ; wait()
-    pyautogui.click(*coords["escape"])
+    clic("invite")             ; wait()
+    clic("escape")
 
 
 # =============================================================================
@@ -1615,22 +1791,30 @@ def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
         clan_tags = []
         if searching_players:
             with Timer("recherche aléatoire de clans"):
-                for i in tqdm(range(different_name), desc="Génération préfixes aléatoires"):
-                    if _stop():
-                        logging.info("Invitation interrompue (stop_event).")
-                        return
-                    clan_tags.extend(random_clan_search(nb_of_clan_with_the_same_name))
-                    if progress_callback:
-                        # Progression 0 -> 80% pour la recherche
-                        perc = ((i + 1) / different_name) * 80
-                        progress_callback(perc, 100)
-            
+                # Recherches en parallèle, cadencées par le pool de clés. Une
+                # recherche aléatoire en échec ne laisse pas de trou : elle
+                # donne seulement moins de clans candidats.
+                n_workers = min(workers_scan(), max(1, different_name))
+                with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                    futures = [executor.submit(random_clan_search, nb_of_clan_with_the_same_name)
+                               for _ in range(different_name)]
+                    for i, future in enumerate(tqdm(as_completed(futures), total=len(futures),
+                                                    desc="Recherche aléatoire de clans")):
+                        if _stop():
+                            for f in futures:
+                                f.cancel()
+                            logging.info("Invitation interrompue (stop_event).")
+                            return
+                        try:
+                            clan_tags.extend(future.result())
+                        except Exception as e:
+                            logging.error(f"Recherche aléatoire : {e}")
+                        if progress_callback:
+                            # Progression 0 -> 80% pour la recherche
+                            progress_callback(((i + 1) / different_name) * 80, 100)
+
             # Recherche joueurs
-            players = get_all_clan_members_threadpool(
-                clan_tags, API_TOKEN,
-                max_workers=DEFAULT_MAX_WORKERS,
-                condition=condition
-            )
+            players = get_all_clan_members_threadpool(clan_tags, condition=condition)
 
             tags = list({tag for clan in players for tag in clan})
             save_players_to_excel(players, FILE_ALL_PLAYERS)
@@ -1668,6 +1852,268 @@ def invite(different_name: int = 10, nb_of_clan_with_the_same_name: int = 10,
         
         if progress_callback:
              progress_callback(100, 100)
+
+
+# =============================================================================
+# INVITATION DEPUIS LA BASE (mode incrémental)
+# =============================================================================
+# La méthode aléatoire cherche des clans au hasard puis interroge l'API à chaque
+# lancement. Le mode incrémental part au contraire des joueurs DÉJÀ scannés
+# (All_Players.parquet, alimenté par scan_players_incremental) : on y applique
+# simplement les filtres de l'interface et on invite les X premiers. Aucune
+# requête API, donc des invitations immédiates sur une base de plusieurs
+# centaines de milliers de joueurs.
+
+
+def read_invited_tags(path: str = FILE_INVITED_TAGS) -> set:
+    """Tags déjà invités (historique cumulatif) — vide si le fichier est absent."""
+    return set(read_tags_from_txt(path))
+
+
+def mark_invited(tag: str, path: str = FILE_INVITED_TAGS) -> None:
+    """Ajoute un tag à l'historique des invités (append, une ligne par tag)."""
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(tag.strip() + os.linesep)
+    except Exception as e:
+        logging.error(f"Erreur écriture historique d'invitations : {e}")
+
+
+# --- Curseur de reprise ------------------------------------------------------
+# L'historique ci-dessus suffit à ne jamais réinviter quelqu'un (il est complété
+# après CHAQUE invitation, donc même un plantage ne fait rien perdre). Le
+# curseur, lui, est un point de reprise lisible — dernier joueur invité, total
+# cumulé, date — enregistré tous les ``checkpoint_every`` joueurs pour éviter
+# une écriture JSON à chaque invitation.
+
+def load_invite_state(path: str = FILE_INVITE_STATE) -> dict:
+    """Curseur d'invitation ({} si aucune session n'a encore tourné)."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception as e:
+        logging.error(f"Erreur lecture {path} : {e}")
+        return {}
+
+
+def save_invite_state(updates: dict, path: str = FILE_INVITE_STATE) -> dict:
+    """Fusionne ``updates`` dans le curseur et l'enregistre."""
+    state = load_invite_state(path)
+    state.update(updates)
+    state["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"Erreur écriture {path} : {e}")
+    return state
+
+
+def invite_stats() -> dict:
+    """Résumé de l'avancement : nb de joueurs déjà invités + curseur."""
+    state = load_invite_state()
+    return {
+        "invited": len(read_invited_tags()),
+        "last_tag": state.get("last_tag"),
+        "updated": state.get("updated"),
+        "session_invited": state.get("session_invited", 0),
+    }
+
+
+def reset_invite_history(path: str = FILE_INVITED_TAGS) -> int:
+    """Repart de zéro : efface l'historique des invités et le curseur.
+
+    Retourne le nombre de joueurs oubliés — ils redeviennent invitables."""
+    oublies = len(read_invited_tags(path))
+    for f_path in (path, FILE_INVITE_STATE):
+        try:
+            if os.path.exists(f_path):
+                os.remove(f_path)
+        except OSError as e:
+            logging.error(f"Erreur suppression {f_path} : {e}")
+    logging.info(f"[invite_base] Historique réinitialisé : {oublies} joueur(s) "
+                 "redeviennent invitables.")
+    return oublies
+
+
+def filter_players_dataframe(df: pd.DataFrame, cfg: dict = None) -> pd.DataFrame:
+    """Applique les filtres de FILTER_CONFIG aux lignes du parquet joueurs.
+
+    Équivalent « colonnes » de :func:`filter_player` (qui, lui, travaille sur la
+    réponse JSON de l'API) : les joueurs ont été enregistrés avec les filtres en
+    vigueur au moment du scan, on les re-filtre donc avec ceux de l'interface.
+    """
+    cfg = cfg if cfg is not None else FILTER_CONFIG
+    if df.empty:
+        return df
+
+    out = df
+    for col, key in (("townHallLevel", "min_townhall"), ("expLevel", "min_xp"),
+                     ("donations", "min_donations")):
+        seuil = cfg.get(key, 0) or 0
+        if seuil and col in out.columns:
+            out = out[pd.to_numeric(out[col], errors="coerce").fillna(0) >= seuil]
+
+    if cfg.get("require_activity", True) and "donations" in out.columns:
+        don = pd.to_numeric(out["donations"], errors="coerce").fillna(0)
+        rec = pd.to_numeric(out.get("donationsReceived", 0), errors="coerce").fillna(0)
+        out = out[(don > 0) | (rec > 0)]
+
+    if "league" in out.columns:
+        if cfg.get("exclude_unranked", False):
+            out = out[out["league"].notna() & (out["league"] != "Unranked")]
+
+        min_league_id = cfg.get("min_league_id", 0)
+        if min_league_id:
+            min_rank = league_rank({"id": min_league_id})
+            if min_rank:
+                # Un rang par NOM de ligue distinct : la base en compte quelques
+                # dizaines, inutile de recalculer pour chacune des 244k lignes.
+                rangs = {name: league_rank({"name": name})
+                         for name in out["league"].dropna().unique()}
+                out = out[out["league"].map(rangs).fillna(0) >= min_rank]
+
+    return out
+
+
+def select_players_to_invite(limit: int = 100,
+                             players_file: str = FILE_ALL_PLAYERS,
+                             exclude_invited: bool = True,
+                             cfg: dict = None) -> list:
+    """Tags des joueurs de la base correspondant aux filtres, meilleurs d'abord.
+
+    Un joueur peut avoir été relevé plusieurs fois (une ligne par scan) : seule
+    sa ligne la plus récente est retenue. Les joueurs déjà invités
+    (``invited_tags.txt``) sont écartés par défaut.
+    """
+    df = _read_data(players_file)
+    if df.empty or "player_tag" not in df.columns:
+        logging.error(f"[invite_base] Aucun joueur dans {players_file}. "
+                      "Lance d'abord un scan incrémental de joueurs.")
+        return []
+
+    total = len(df)
+    df = filter_players_dataframe(df, cfg)
+    if df.empty:
+        logging.warning(f"[invite_base] 0 joueur sur {total} ne passe les filtres.")
+        return []
+
+    # Une seule ligne par joueur : la plus récente.
+    if "timestamp" in df.columns:
+        df = df.sort_values("timestamp")
+    df = df.drop_duplicates(subset="player_tag", keep="last")
+
+    # Meilleurs joueurs d'abord : grade, puis trophées.
+    if "league" in df.columns:
+        rangs = {name: league_rank({"name": name})
+                 for name in df["league"].dropna().unique()}
+        df = df.assign(_rang=df["league"].map(rangs).fillna(0))
+        tri = ["_rang"] + (["trophies"] if "trophies" in df.columns else [])
+        df = df.sort_values(tri, ascending=False)
+    elif "trophies" in df.columns:
+        df = df.sort_values("trophies", ascending=False)
+
+    tags = [t for t in df["player_tag"].dropna().tolist() if t]
+
+    if exclude_invited:
+        deja = read_invited_tags()
+        if deja:
+            tags = [t for t in tags if t not in deja]
+
+    logging.info(f"[invite_base] {len(tags)} joueurs éligibles sur {total} lignes "
+                 f"(déjà invités exclus) | limite demandée : {limit}")
+    return tags[:max(0, int(limit))]
+
+
+def invite_from_database(max_players: int = 100, inviting: bool = True,
+                         players_file: str = FILE_ALL_PLAYERS,
+                         resume: bool = True, checkpoint_every: int = 20,
+                         progress_callback=None, stop_event=None) -> list:
+    """Invite ``max_players`` joueurs pris dans la base scannée (mode incrémental).
+
+    ``resume=True`` (défaut) : on REPREND là où la session précédente s'était
+    arrêtée — les joueurs présents dans ``invited_tags.txt`` sont écartés, donc
+    personne n'est réinvité. ``resume=False`` : on repart du haut du classement
+    sans tenir compte de l'historique (utile pour une relance volontaire) ;
+    l'historique n'est pas effacé pour autant — :func:`reset_invite_history` est
+    là pour ça.
+
+    Les tags retenus sont écrits dans ``player_tags.txt`` (file d'attente) avant
+    la première invitation : si l'automatisation est interrompue, la file reste
+    exploitable. Chaque joueur invité est retiré de la file et ajouté à
+    l'historique ; le curseur de reprise est enregistré tous les
+    ``checkpoint_every`` joueurs (et en fin de session).
+    """
+    def _stop() -> bool:
+        return stop_event is not None and stop_event.is_set()
+
+    with Timer("invite depuis la base"):
+        etat = load_invite_state()
+        if resume and etat.get("last_tag"):
+            logging.info(f"[invite_base] Reprise après {etat['last_tag']} "
+                         f"({etat.get('updated')}) — "
+                         f"{len(read_invited_tags())} joueur(s) déjà invités.")
+        elif not resume:
+            logging.info("[invite_base] Reprise désactivée : sélection depuis le "
+                         "début du classement (historique conservé).")
+
+        tags = select_players_to_invite(max_players, players_file=players_file,
+                                        exclude_invited=resume)
+        if not tags:
+            logging.warning("[invite_base] Aucun joueur à inviter "
+                            "(filtres trop stricts ou base vide ?).")
+            if progress_callback:
+                progress_callback(100, 100)
+            return []
+
+        save_tags_to_txt(tags)
+        logging.info(f"[invite_base] {len(tags)} tags écrits dans {FILE_PLAYER_TAGS}")
+
+        if not inviting:
+            if progress_callback:
+                progress_callback(100, 100)
+            return tags
+
+        file_attente = read_tags_from_txt()
+        total_deja = len(read_invited_tags())
+        invites = []
+        for i, tag in enumerate(tqdm(tags, desc="Invitations (base)", unit="inv")):
+            if _stop():
+                logging.info("[invite_base] Invitation interrompue (stop_event).")
+                break
+            try:
+                automate_coc_input(tag)
+            except Exception as e:
+                # Un échec d'automatisation (fenêtre déplacée, clic refusé…) ne
+                # doit pas perdre les joueurs restants : on passe au suivant.
+                logging.error(f"[invite_base] Échec sur {tag} : {e}")
+                continue
+            invites.append(tag)
+            mark_invited(tag)
+            if tag in file_attente:
+                file_attente.remove(tag)
+                save_tags_to_txt(file_attente, overwrite=True)
+            if checkpoint_every and len(invites) % checkpoint_every == 0:
+                save_invite_state({"last_tag": tag,
+                                   "total_invited": total_deja + len(invites),
+                                   "session_invited": len(invites)})
+                logging.info(f"[invite_base] 💾 Point de reprise : {tag} "
+                             f"({len(invites)} invités cette session).")
+            if progress_callback:
+                progress_callback(((i + 1) / len(tags)) * 100, 100)
+
+        if invites:
+            # Point de reprise final : la session peut s'être arrêtée entre deux
+            # checkpoints (limite atteinte, Stop, plantage de l'automatisation).
+            save_invite_state({"last_tag": invites[-1],
+                               "total_invited": total_deja + len(invites),
+                               "session_invited": len(invites)})
+        logging.info(f"[invite_base] ✅ {len(invites)} joueur(s) invité(s).")
+        if progress_callback:
+            progress_callback(100, 100)
+        return invites
 
 
 def spy_my_clan(clan_tag: str = "#2R2YVCLJQ", **kwargs):

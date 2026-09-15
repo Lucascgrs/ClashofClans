@@ -1,0 +1,40 @@
+{
+    "type": "invite",
+    "name": "2000invit_incremental_reprendre",
+    "mode": "incremental",
+    "filters": {
+        "min_townhall": 17,
+        "min_xp": 190,
+        "min_donations": 1,
+        "exclude_unranked": true,
+        "require_activity": true,
+        "min_league_id": 105000029
+    },
+    "location_ids": [
+        32000029,
+        32000047,
+        32000087,
+        32000088,
+        32000089,
+        32000100,
+        32000107,
+        32000139,
+        32000149,
+        32000152,
+        32000156,
+        32000167,
+        32000191,
+        32000195,
+        32000199,
+        32000200,
+        32000226,
+        32000256
+    ],
+    "different_name": 10,
+    "nb_of_clan_with_the_same_name": 10,
+    "do_search": false,
+    "do_invite": true,
+    "invite_limit": 2000,
+    "invite_resume": true,
+    "scan_limit_players": 2000
+}

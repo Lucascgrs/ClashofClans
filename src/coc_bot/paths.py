@@ -112,6 +112,14 @@ ATTACK_CONFIG_FILE: str = config_path("attack_config.json")
 ACCOUNTS_CONFIG_FILE: str = config_path("accounts_config.json")
 MULTI_LAST_FILE: str = config_path("multi_account_config.json")
 PLAYER_TAGS_FILE: str = data_path("player_tags.txt")
+# Historique des joueurs déjà invités : évite de réinviter les mêmes à chaque
+# invitation depuis la base (le fichier de file d'attente, lui, se vide).
+INVITED_TAGS_FILE: str = data_path("invited_tags.txt")
+# Curseur d'invitation : dernier joueur invité, total cumulé, date du point de
+# reprise (écrit tous les N joueurs pendant une session d'invitation).
+INVITE_STATE_FILE: str = config_path("invite_state.json")
+# Pool de clés API : nombre de clés, limite par clé, ajustement dynamique.
+API_KEYS_CONFIG_FILE: str = config_path("api_keys_config.json")
 CLANHOP_CONFIG_FILE: str = config_path("clanhop_config.json")
 CLANHOP_STATE_FILE: str = config_path("clanhop_state.json")
 ORCHESTRATION_SETTINGS_FILE: str = str(ORCHESTRATION_DIR / "orchestration_settings.json")
@@ -140,6 +148,7 @@ _LEGACY_ROOT_CONFIGS = (
     "clanhop_state.json",
     "builder_base_leagues.json",
     "league_tiers.json",
+    "invite_state.json",
 )
 
 

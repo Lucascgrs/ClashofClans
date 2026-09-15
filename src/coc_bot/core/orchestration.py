@@ -67,6 +67,9 @@ LogCallback = Callable[[str], None]
 
 SETTINGS_FILE = ORCHESTRATION_SETTINGS_FILE
 DEFAULT_STOP_HOTKEY = "<f12>"
+# Pause / reprise des macros. Pas F11 : elle bascule le plein écran de la
+# plupart des émulateurs, ce qui décalerait toutes les coordonnées.
+DEFAULT_PAUSE_HOTKEY = "<f9>"
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +131,7 @@ def release_input_devices() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Réglages (raccourci d'arrêt d'urgence)
+# Réglages (raccourcis d'arrêt d'urgence et de pause)
 # ---------------------------------------------------------------------------
 
 def load_settings() -> dict:
@@ -138,6 +141,7 @@ def load_settings() -> dict:
     except Exception:
         data = {}
     data.setdefault("stop_hotkey", DEFAULT_STOP_HOTKEY)
+    data.setdefault("pause_hotkey", DEFAULT_PAUSE_HOTKEY)
     return data
 
 
@@ -231,17 +235,30 @@ def run_invite(cfg: dict, stop_event: threading.Event, log: LogCallback) -> None
     if mode in ("incremental", "les_deux"):
         if stop_event.is_set():
             return
-        limit = int(cfg.get("scan_limit_players", 2000))
-        log(f"Scan incrémental des joueurs (limite={limit})…")
-        try:
-            # stop_event : le scan s'arrête proprement entre deux batchs
-            # (sauvegarde faite) au lieu d'être tué en pleine écriture.
-            COC.scan_players_incremental(max_new_players=limit,
-                                         stop_event=stop_event)
-        except COC.ScanAlreadyRunning as e:
-            # L'orchestrateur peut se déclencher pendant un scan manuel :
-            # on saute l'étape au lieu de lancer un second scan concurrent.
-            log(f"⚠ {e}")
+        if cfg.get("do_search", True):
+            limit = int(cfg.get("scan_limit_players", 2000))
+            log(f"Scan incrémental des joueurs (limite={limit})…")
+            try:
+                # stop_event : le scan s'arrête proprement entre deux batchs
+                # (sauvegarde faite) au lieu d'être tué en pleine écriture.
+                COC.scan_players_incremental(max_new_players=limit,
+                                             stop_event=stop_event)
+            except COC.ScanAlreadyRunning as e:
+                # L'orchestrateur peut se déclencher pendant un scan manuel :
+                # on saute l'étape au lieu de lancer un second scan concurrent.
+                log(f"⚠ {e}")
+
+        if stop_event.is_set():
+            return
+        # Invitation SANS recherche : les joueurs sortent de All_Players.parquet,
+        # filtrés par les mêmes critères que le scan.
+        nb = int(cfg.get("invite_limit", 50))
+        log(f"Invitation depuis la base (limite={nb})…")
+        tags = COC.invite_from_database(max_players=nb,
+                                        inviting=bool(cfg.get("do_invite", True)),
+                                        resume=bool(cfg.get("invite_resume", True)),
+                                        stop_event=stop_event)
+        log(f"{len(tags)} joueur(s) traités depuis la base.")
 
     if mode in ("aleatoire", "les_deux"):
         if stop_event.is_set():

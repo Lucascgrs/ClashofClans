@@ -7,6 +7,7 @@ un écran à la fois. Fournit aussi les services partagés par tous les écrans 
 * lancement d'automatisations suivies (:meth:`spawn_automation`) tuables par
   l'arrêt d'urgence ;
 * arrêt d'urgence global (bouton + raccourci clavier) ;
+* pause / reprise globale des macros (bouton + raccourci clavier + bip) ;
 * liste des macros ``Actions/`` partagée entre écrans.
 """
 
@@ -21,6 +22,7 @@ import customtkinter as ctk
 
 from .. import paths
 from ..core import orchestration
+from ..core.pause import PAUSE
 from . import theme
 
 
@@ -40,6 +42,21 @@ def _force_utf8_io() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+
+
+def _meme_raccourci(a: str, b: str) -> bool:
+    """Vrai si deux combinaisons pynput désignent les mêmes touches
+    (« <F9> » et « <f9> », « <ctrl>+s » et « s+<ctrl> »…)."""
+    from pynput import keyboard
+    try:
+        return set(keyboard.HotKey.parse(a)) == set(keyboard.HotKey.parse(b))
+    except Exception:
+        return False
+
+
+def _libelle_touche(combo: str) -> str:
+    """« <ctrl>+<shift>+p » → « Ctrl+Shift+P » (affichage compact)."""
+    return "+".join(p.strip("<>").capitalize() for p in (combo or "").split("+") if p)
 
 
 # (clé, icône, libellé, module, classe)
@@ -92,6 +109,11 @@ class CocBotApp(ctk.CTk):
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
         self._current_key: Optional[str] = None
 
+        # --- Raccourcis globaux (lus avant la barre latérale qui les affiche)
+        settings = orchestration.load_settings()
+        self.stop_hotkey = settings.get("stop_hotkey", orchestration.DEFAULT_STOP_HOTKEY)
+        self.pause_hotkey = settings.get("pause_hotkey", orchestration.DEFAULT_PAUSE_HOTKEY)
+
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self._build_sidebar()
@@ -100,9 +122,8 @@ class CocBotApp(ctk.CTk):
         self._content.grid_rowconfigure(0, weight=1)
         self._content.grid_columnconfigure(0, weight=1)
 
-        # Raccourci d'arrêt d'urgence global
-        self.stop_hotkey = orchestration.load_settings().get(
-            "stop_hotkey", orchestration.DEFAULT_STOP_HOTKEY)
+        # Écoute clavier globale : arrêt d'urgence + pause/reprise des macros
+        PAUSE.ajouter_observateur(self._on_pause_changed)
         self.start_hotkey_listener()
 
         self.refresh_action_files()
@@ -134,7 +155,7 @@ class CocBotApp(ctk.CTk):
             btn.grid(row=i, column=0, sticky="ew", padx=theme.PAD_S, pady=2)
             self._nav_buttons[key] = btn
 
-        # Zone basse : apparence + arrêt d'urgence
+        # Zone basse : apparence + pause des macros + arrêt d'urgence
         bottom = ctk.CTkFrame(bar, fg_color="transparent")
         bottom.grid(row=len(NAV_ITEMS) + 2, column=0, sticky="ew",
                     padx=theme.PAD_S, pady=theme.PAD_S)
@@ -149,14 +170,41 @@ class CocBotApp(ctk.CTk):
         seg.grid(row=1, column=0, sticky="ew", pady=(2, theme.PAD_S))
 
         ctk.CTkButton(
+            bottom, text="🔑  Clés API", height=36, fg_color="transparent",
+            border_width=1, text_color=("gray15", "gray85"),
+            hover_color=("#DADADD", "#2E313A"), font=theme.font_body(),
+            command=self.open_api_keys_window).grid(row=2, column=0, sticky="ew",
+                                                    pady=(0, theme.PAD_S))
+
+        self._btn_pause = ctk.CTkButton(
+            bottom, height=36, font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.toggle_pause)
+        self._btn_pause.grid(row=3, column=0, sticky="ew", pady=(0, theme.PAD_S))
+        # Couleurs du thème, restaurées à la reprise
+        self._pause_colors = {k: self._btn_pause.cget(k)
+                              for k in ("fg_color", "hover_color", "text_color")}
+        self._refresh_pause_button()
+
+        ctk.CTkButton(
             bottom, text="⛔  ARRÊT D'URGENCE", height=44,
             fg_color=theme.DANGER, hover_color=theme.DANGER_HOVER,
             font=ctk.CTkFont(size=13, weight="bold"),
-            command=self.emergency_stop_all).grid(row=2, column=0, sticky="ew")
+            command=self.emergency_stop_all).grid(row=4, column=0, sticky="ew")
 
     def _on_appearance_change(self, value: str):
         ctk.set_appearance_mode(
             {"Sombre": "dark", "Clair": "light", "Système": "system"}.get(value, "dark"))
+
+    def open_api_keys_window(self):
+        """Ouvre la fenêtre « 🔑 Clés API » (ou la ramène au premier plan)."""
+        from .fenetre_cles import FenetreClesAPI
+        fenetre = getattr(self, "_fenetre_cles", None)
+        if fenetre is not None and fenetre.winfo_exists():
+            fenetre.deiconify()
+            fenetre.lift()
+            fenetre.focus_force()
+            return
+        self._fenetre_cles = FenetreClesAPI(self, self)
 
     # =====================================================================
     # Navigation
@@ -299,11 +347,42 @@ class CocBotApp(ctk.CTk):
             if t.is_alive():
                 orchestration.async_raise(t, orchestration.EmergencyStop)
 
+        # Lève une éventuelle pause APRÈS les arrêts : une macro figée meurt
+        # sans reprendre, et la prochaine lancée ne démarrera pas en pause.
+        PAUSE.reinitialiser()
+
         # Relâche boutons/modificateurs restés enfoncés
         orchestration.release_input_devices()
 
     # =====================================================================
-    # Raccourci clavier global d'arrêt d'urgence
+    # Pause / reprise globale des macros
+    # =====================================================================
+    def toggle_pause(self):
+        """Met en pause ou relance toutes les lectures de macros (avec bip)."""
+        PAUSE.basculer()
+
+    def _on_pause_changed(self, en_pause: bool):
+        # Appelé depuis le thread qui a basculé (souvent le listener clavier).
+        touche = _libelle_touche(self.pause_hotkey)
+        self.log(f"⏸ Macros en pause — {touche} pour reprendre." if en_pause
+                 else "▶ Reprise des macros.")
+        try:
+            self.after(0, self._refresh_pause_button)
+        except Exception:
+            pass
+
+    def _refresh_pause_button(self):
+        touche = _libelle_touche(self.pause_hotkey)
+        if PAUSE.en_pause:
+            self._btn_pause.configure(text=f"▶  Reprendre  ·  {touche}",
+                                      fg_color=theme.WARNING, hover_color=theme.ACCENT_HOVER,
+                                      text_color=("white", "gray10"))
+        else:
+            self._btn_pause.configure(text=f"⏸  Pause macros  ·  {touche}",
+                                      **self._pause_colors)
+
+    # =====================================================================
+    # Raccourcis clavier globaux (arrêt d'urgence + pause des macros)
     # =====================================================================
     def start_hotkey_listener(self):
         from pynput import keyboard
@@ -314,17 +393,34 @@ class CocBotApp(ctk.CTk):
                 pass
             self._hotkey_listener = None
 
-        combo = (self.stop_hotkey or orchestration.DEFAULT_STOP_HOTKEY).strip()
+        # L'arrêt d'urgence passe en premier : si les deux touches se
+        # confondent, c'est la pause qui est désactivée, jamais l'arrêt.
+        raccourcis: dict[str, Callable[[], None]] = {}
+        for nom, combo, action in (
+                ("d'arrêt d'urgence", self.stop_hotkey or orchestration.DEFAULT_STOP_HOTKEY,
+                 self._on_emergency_hotkey),
+                ("de pause / reprise", self.pause_hotkey or orchestration.DEFAULT_PAUSE_HOTKEY,
+                 self._on_pause_hotkey)):
+            combo = combo.strip()
+            try:
+                keyboard.HotKey.parse(combo)  # valide le format pynput
+            except Exception as e:
+                self.log(f"⚠ Raccourci {nom} invalide « {combo} » ({e}) — désactivé.")
+                continue
+            if any(_meme_raccourci(combo, deja) for deja in raccourcis):
+                self.log(f"⚠ Raccourci {nom} « {combo} » déjà utilisé — désactivé.")
+                continue
+            raccourcis[combo] = action
+            self.log(f"Raccourci {nom} actif : {combo}")
+
+        if not raccourcis:
+            return
         try:
-            keyboard.HotKey.parse(combo)  # valide le format pynput
-            self._hotkey_listener = keyboard.GlobalHotKeys(
-                {combo: self._on_emergency_hotkey})
+            self._hotkey_listener = keyboard.GlobalHotKeys(raccourcis)
             self._hotkey_listener.start()
-            self.log(f"Raccourci d'arrêt d'urgence actif : {combo}")
         except Exception as e:
             self._hotkey_listener = None
-            self.log(f"⚠ Raccourci invalide « {combo} » ({e}) — "
-                     f"arrêt d'urgence clavier désactivé.")
+            self.log(f"⚠ Écoute du clavier impossible ({e}) — raccourcis désactivés.")
 
     def _on_emergency_hotkey(self):
         # Appelé depuis le thread du listener pynput → passe par Tk.
@@ -333,20 +429,37 @@ class CocBotApp(ctk.CTk):
         except Exception as e:
             print(f"Erreur arrêt d'urgence : {e}")
 
-    def apply_stop_hotkey(self, new: str) -> bool:
-        """Valide et applique un nouveau raccourci. Retourne True si accepté."""
+    def _on_pause_hotkey(self):
+        # Appelé depuis le thread d'écoute pynput, qui doit rendre la main tout
+        # de suite (les frappes suivantes attendent derrière). La bascule part
+        # dans un thread à part, sans passer par Tk : la pause prend effet même
+        # si l'interface est occupée, le bouton suit via l'observateur.
+        threading.Thread(target=PAUSE.basculer, daemon=True, name="pause-macros").start()
+
+    def apply_stop_hotkey(self, new: str) -> None:
+        """Valide, enregistre et applique la touche d'arrêt d'urgence.
+        Lève ValueError (message affichable) si elle est refusée."""
+        self._apply_hotkey("stop_hotkey", new, self.pause_hotkey, "de pause / reprise")
+
+    def apply_pause_hotkey(self, new: str) -> None:
+        """Idem pour la touche de pause / reprise des macros."""
+        self._apply_hotkey("pause_hotkey", new, self.stop_hotkey, "d'arrêt d'urgence")
+
+    def _apply_hotkey(self, cle: str, new: str, autre: str, autre_nom: str) -> None:
         from pynput import keyboard
         new = (new or "").strip()
         try:
             keyboard.HotKey.parse(new)
         except Exception:
-            return False
-        self.stop_hotkey = new
+            raise ValueError("Format pynput attendu, ex. <f12> ou <ctrl>+<shift>+s.") from None
+        if _meme_raccourci(new, autre):
+            raise ValueError(f"« {new} » est déjà la touche {autre_nom}.")
+        setattr(self, cle, new)
         settings = orchestration.load_settings()
-        settings["stop_hotkey"] = new
+        settings[cle] = new
         orchestration.save_settings(settings)
         self.start_hotkey_listener()
-        return True
+        self._refresh_pause_button()
 
     def _on_close(self):
         if self._hotkey_listener is not None:

@@ -166,7 +166,9 @@ class ClanHopView(BaseView):
         self.v_macro = tk.StringVar(value=p.get("macro_slide", ""))
         self.v_clics = tk.IntVar(value=int(p.get("clics_avant_verif", 5)))
         self.v_slides = tk.IntVar(value=int(p.get("max_slides", 3)))
-        self.v_echap = tk.BooleanVar(value=bool(p.get("echap_apres_don", True)))
+        self.v_titre = tk.StringVar(value=p.get("mots_cles_panneau",
+                                               "donner, troupes"))
+        self.v_coin = tk.BooleanVar(value=bool(p.get("fermer_par_coin", True)))
         self.v_sat = tk.IntVar(value=int(p.get("saturation_min", 90)))
         self.v_val = tk.IntVar(value=int(p.get("valeur_min", 70)))
         self.v_aire = tk.IntVar(value=int(p.get("aire_min_carte", 1200)))
@@ -186,10 +188,15 @@ class ClanHopView(BaseView):
         ctk.CTkEntry(drow, textvariable=self.v_mots).grid(
             row=0, column=1, sticky="ew", padx=6)
 
-        ctk.CTkLabel(drow, text="Macro de défilement des troupes (Actions/) :").grid(
+        ctk.CTkLabel(drow, text="Titre du panneau de dons (mots-clés) :").grid(
             row=1, column=0, sticky="w", pady=(4, 0))
+        ctk.CTkEntry(drow, textvariable=self.v_titre).grid(
+            row=1, column=1, sticky="ew", padx=6, pady=(4, 0))
+
+        ctk.CTkLabel(drow, text="Macro de défilement des troupes (Actions/) :").grid(
+            row=2, column=0, sticky="w", pady=(4, 0))
         self.cb_macro = ctk.CTkComboBox(drow, variable=self.v_macro, values=[""])
-        self.cb_macro.grid(row=1, column=1, sticky="ew", padx=6, pady=(4, 0))
+        self.cb_macro.grid(row=2, column=1, sticky="ew", padx=6, pady=(4, 0))
         self.app.register_action_observer(self._on_actions_changed)
 
         grid = ctk.CTkFrame(dons.body, fg_color="transparent")
@@ -215,20 +222,27 @@ class ClanHopView(BaseView):
                          text_color=theme.MUTED, anchor="w").pack(fill="x")
             ctk.CTkEntry(cell, textvariable=var, width=140).pack(fill="x")
 
-        ctk.CTkCheckBox(dons.body, text="ÉCHAP si le panneau de dons reste ouvert",
-                        variable=self.v_echap).grid(row=3, column=0, sticky="w",
-                                                    pady=(theme.PAD_S, 0))
+        ctk.CTkCheckBox(dons.body,
+                        text="Refermer le panneau de dons par un clic en (0, 0)",
+                        variable=self.v_coin).grid(row=3, column=0, sticky="w",
+                                                   pady=(theme.PAD_S, 0))
 
         hint_label(
             dons.body,
             "Après le clic sur une demande, le bot clique les cartes de troupes "
-            "EN COULEUR (les grisées sont indisponibles) jusqu'à ce que le "
-            "compteur « X/Y » atteigne Y. Une vue entièrement grisée n'est PAS "
-            "une fin : tant que le panneau est ouvert et que X n'a pas atteint "
-            "Y, il joue la macro de défilement pour aller chercher les troupes "
-            "hors cadre, jusqu'à « Défilements max » fois. « Clics sans effet "
-            "max » borne les clics qui ne font pas avancer le compteur — au-delà "
-            "la vue est jugée épuisée et on défile.\n"
+            "EN COULEUR (les grisées sont indisponibles), en partant de la "
+            "DROITE : la bande range les troupes de la plus basique à la plus "
+            "avancée, et ce sont les dernières qui rapportent le plus de points "
+            "de don. Le panneau qui "
+            "DISPARAÎT — le titre « Donner des troupes » ne se lit plus — est le "
+            "signal de fin : tout ce qui pouvait être donné l'a été. Une vue "
+            "entièrement grisée n'est PAS une fin : la bande des troupes défile, "
+            "et d'autres cartes attendent peut-être hors cadre, donc il joue la "
+            "macro de défilement et recommence, jusqu'à « Défilements max » "
+            "fois. Puis il referme le panneau d'un clic en (0, 0). « Clics sans "
+            "effet max » n'est qu'un garde-fou : au-delà de ce nombre de clics "
+            "qui ne font pas avancer le compteur, la vue est jugée épuisée et on "
+            "défile.\n"
             "Une fois le champ visible servi, si le petit bouton vert « demandes "
             "plus haut » est présent, le bot clique dessus et refait un scan — "
             "tant qu'il est là, c'est qu'il reste des demandes actives. La zone "
@@ -404,7 +418,8 @@ class ClanHopView(BaseView):
             "macro_slide": self.v_macro.get().strip(),
             "clics_avant_verif": int(self.v_clics.get()),
             "max_slides": int(self.v_slides.get()),
-            "echap_apres_don": bool(self.v_echap.get()),
+            "mots_cles_panneau": self.v_titre.get().strip(),
+            "fermer_par_coin": bool(self.v_coin.get()),
             "saturation_min": int(self.v_sat.get()),
             "valeur_min": int(self.v_val.get()),
             "aire_min_carte": int(self.v_aire.get()),
@@ -518,10 +533,11 @@ class ClanHopView(BaseView):
                 cartes = hopper.cartes_donnables()
                 for c in cartes:
                     self._log(f"  donnable en ({c['x']}, {c['y']}) — aire {c['aire']} px")
-                donnees, demandees = hopper.lire_compteur()
+                ouvert, donnees, demandees = hopper.etat_panneau()
                 compteur = (f"{donnees}/{demandees}" if donnees is not None
-                            else "illisible (panneau fermé ?)")
-                self._log(f"--- {len(cartes)} carte(s) donnable(s) | "
+                            else "illisible")
+                self._log(f"--- {len(cartes)} carte(s) donnable(s) | panneau "
+                          f"{'OUVERT' if ouvert else 'FERMÉ (titre absent)'} | "
                           f"compteur : {compteur} ---")
             except Exception as e:
                 self._log(f"Erreur détection des cartes : {e}")

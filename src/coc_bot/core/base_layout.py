@@ -331,19 +331,21 @@ class BaseLayoutRunner(WallsUpgrader):
                 self.log("⚠ HDV via API : identifiants développeur (.env) absents "
                          "— renseignez DEV_EMAIL / DEV_PASSWORD.")
                 return 0
-            from .token_manager import get_or_create_token
+            # Pool de clés API : léger (n'importe pas coc_api), cadencé et
+            # partagé avec les scans qui tourneraient en même temps.
             import requests
-            token = get_or_create_token()
-            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+            from .cles_api import API_URL, gestionnaire
             tag_enc = tag.replace("#", "%23")
-            r = requests.get(
-                f"https://api.clashofclans.com/v1/players/{tag_enc}",
-                headers=headers, timeout=8)
-            if r.status_code == 200:
+            try:
+                r = gestionnaire().get(f"{API_URL}/players/{tag_enc}", tentatives=3)
+            except requests.HTTPError as e:
+                self.log(f"⚠ HDV via API : réponse {e.response.status_code} pour {tag}.")
+                return 0
+            if r is not None:
                 lvl = int(r.json().get("townHallLevel", 0) or 0)
                 self.log(f"HDV via API ({tag}) : niveau {lvl}")
                 return lvl
-            self.log(f"⚠ HDV via API : réponse {r.status_code} pour {tag}.")
+            self.log(f"⚠ HDV via API : pas de réponse pour {tag} (réseau ou API indisponible).")
         except Exception as e:
             self.log(f"⚠ Lecture HDV via API impossible : {e}")
         return 0
